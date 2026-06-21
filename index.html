@@ -1,0 +1,1791 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Converter</title>
+    <!-- Cross-Origin Isolation needed for SharedArrayBuffer (WASM threads in jsquash).
+         coi-serviceworker installs a SW that adds the required COOP/COEP headers,
+         which GitHub Pages (and most static hosts) don't send by default. -->
+    <script src="https://unpkg.com/coi-serviceworker@0.1.9/coi-serviceworker.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --navbar-h: 38px;
+            --panel-bg: #161b22;
+            --panel-border: #2d3748;
+            --panel-header: #1a2030;
+            --accent: #38bdf8;
+            --accent-dim: #0ea5e9;
+        }
+        *, *::before, *::after { box-sizing: border-box; }
+        body { overflow: hidden; background: #0d1117; color: #f1f5f9; font-size: 0.925rem; }
+
+        .main-scroll {
+            height: calc(100vh - var(--navbar-h));
+            overflow-y: auto;
+        }
+        @media (min-width: 992px) {
+            .sticky-panel {
+                position: sticky;
+                top: 0.5rem;
+                max-height: calc(100vh - var(--navbar-h) - 1rem);
+                overflow-y: auto;
+                overflow-x: hidden;
+            }
+        }
+        .sticky-panel::-webkit-scrollbar { width: 4px; }
+        .sticky-panel::-webkit-scrollbar-track { background: transparent; }
+        .sticky-panel::-webkit-scrollbar-thumb { background: #374151; border-radius: 2px; }
+
+        .checkered-bg {
+            background-image:
+                linear-gradient(45deg, #1a1f2e 25%, transparent 25%),
+                linear-gradient(-45deg, #1a1f2e 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #1a1f2e 75%),
+                linear-gradient(-45deg, transparent 75%, #1a1f2e 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+            background-color: #111827;
+        }
+
+        .panel-card {
+            background-color: var(--panel-bg) !important;
+            border-color: var(--panel-border) !important;
+        }
+        .panel-header {
+            background-color: var(--panel-header) !important;
+            border-bottom: 1px solid var(--panel-border) !important;
+        }
+        .panel-footer {
+            background-color: var(--panel-header) !important;
+            border-top: 1px solid var(--panel-border) !important;
+        }
+
+        .section-label {
+            font-size: 0.85rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            color: #cbd5e1;
+            margin-bottom: 0.4rem;
+        }
+
+        /* Drop zone */
+        #dropZone {
+            border: 2px dashed var(--panel-border);
+            border-radius: 8px;
+            padding: 10px 10px 8px;
+            transition: border-color 0.15s, background-color 0.15s;
+            cursor: pointer;
+        }
+        #dropZone:hover, #dropZone.drag-over {
+            border-color: var(--accent) !important;
+            background-color: rgba(56, 189, 248, 0.05) !important;
+        }
+        #dropZone .drop-hint {
+            font-size: 0.8rem;
+            color: #94a3b8;
+            margin-top: 4px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* Format pills */
+        .fmt-pill {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            padding: 5px 8px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-radius: 6px;
+            border: 1px solid var(--panel-border);
+            background: #1e2535;
+            color: #f1f5f9;
+            cursor: pointer;
+            transition: all 0.15s;
+            flex: 1;
+        }
+        .fmt-pill:hover { border-color: var(--accent); color: var(--accent); background: rgba(56,189,248,0.08); }
+        .fmt-pill.active {
+            border-color: var(--accent) !important;
+            background: rgba(56,189,248,0.18) !important;
+            color: var(--accent) !important;
+        }
+
+        /* Speed pills */
+        .speed-pill {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4px 6px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            border-radius: 5px;
+            border: 1px solid var(--panel-border);
+            background: #1e2535;
+            color: #f1f5f9;
+            cursor: pointer;
+            transition: all 0.15s;
+            flex: 1;
+        }
+        .speed-pill:hover { border-color: #a78bfa; color: #a78bfa; background: rgba(167,139,250,0.08); }
+        .speed-pill.active {
+            border-color: #a78bfa !important;
+            background: rgba(167,139,250,0.18) !important;
+            color: #a78bfa !important;
+        }
+
+        /* Convert button */
+        #convertBtn {
+            background: linear-gradient(135deg, var(--accent-dim), #6366f1);
+            border: none;
+            color: #fff;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            transition: all 0.15s;
+        }
+        #convertBtn:hover:not(:disabled) {
+            background: linear-gradient(135deg, #0284c7, #4f46e5);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 14px rgba(56,189,248,0.3);
+        }
+        #convertBtn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
+
+        #downloadBtn {
+            background: #22c55e;
+            border: 1px solid #22c55e;
+            color: #fff;
+            font-weight: 700;
+            transition: all 0.15s;
+        }
+        #downloadBtn:hover { background: #16a34a; border-color: #16a34a; }
+        #downloadBtn:disabled { opacity: 0.4; }
+
+        /* Progress */
+        #progressWrap { display: none; }
+        .progress { background: #1e2535; height: 6px; border-radius: 3px; }
+        .progress-bar { background: linear-gradient(90deg, var(--accent), #6366f1); border-radius: 3px; transition: width 0.3s; }
+
+        /* Stats */
+        .stat-box {
+            background: #1a2030;
+            border: 1px solid var(--panel-border);
+            border-radius: 7px;
+            padding: 8px 10px;
+            text-align: center;
+        }
+        .stat-val { font-size: 1.05rem; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+        .stat-lbl { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: #94a3b8; margin-top: 2px; font-weight: 600; }
+
+        /* Preview panels */
+        .preview-wrap {
+            flex: 1 1 0;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+        }
+        .preview-img-box {
+            flex: 1 1 auto;
+            min-height: 0;
+            position: relative;
+            border-radius: 6px;
+            overflow: hidden;
+            cursor: grab;
+            user-select: none;
+        }
+        .preview-img-box:active { cursor: grabbing; }
+        #origBox.empty { cursor: pointer; }
+        #origBox.empty:active { cursor: pointer; }
+        #outImgBox.empty { cursor: pointer; }
+        #outImgBox.empty:active { cursor: pointer; }
+        .preview-viewport {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transform-origin: center center;
+            will-change: transform;
+        }
+        .preview-img-box img {
+            display: block;
+            border-radius: 4px;
+            max-width: none;
+            max-height: none;
+        }
+        #zoomBar {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .zoom-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 26px; height: 26px;
+            border-radius: 5px;
+            border: 1px solid var(--panel-border);
+            background: #1e2535;
+            color: #f1f5f9;
+            cursor: pointer;
+            font-size: 1rem;
+            line-height: 1;
+            transition: all 0.12s;
+            padding: 0;
+        }
+        .zoom-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(56,189,248,0.1); }
+        #zoomLabel {
+            font-size: 0.75rem;
+            font-variant-numeric: tabular-nums;
+            font-weight: 700;
+            color: var(--accent);
+            min-width: 42px;
+            text-align: center;
+        }
+
+
+        /* Divider label */
+        .vs-badge {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 28px;
+            font-size: 0.7rem;
+            font-weight: 800;
+            color: #64748b;
+            letter-spacing: 0.04em;
+            padding-top: 24px; /* align with image, accounting for label height */
+        }
+
+        /* Savings badge */
+        .savings-positive { color: #22c55e; }
+        .savings-negative { color: #f87171; }
+
+        /* Info bar */
+        #infoBar { font-size: 0.85rem; color: #cbd5e1; }
+
+        /* Range styling */
+        .form-range::-webkit-slider-thumb { background: var(--accent); }
+        .form-range::-moz-range-thumb { background: var(--accent); border-color: var(--accent); }
+
+        /* Empty state */
+
+
+        /* Spinner */
+        .spin { animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Error toast */
+        /* Auto-convert toggle */
+        .toggle-wrap {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .toggle-wrap label {
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            color: #cbd5e1;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .toggle-track {
+            position: relative;
+            width: 34px;
+            height: 18px;
+            background: #374151;
+            border-radius: 9px;
+            transition: background 0.2s;
+            flex-shrink: 0;
+            border: 1px solid #4b5563;
+        }
+        .toggle-thumb {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 12px;
+            height: 12px;
+            background: #94a3b8;
+            border-radius: 50%;
+            transition: transform 0.2s, background 0.2s;
+        }
+        .toggle-track.on {
+            background: #0ea5e9 !important;
+            border-color: #0ea5e9 !important;
+        }
+        .toggle-track.on .toggle-thumb {
+            transform: translateX(16px);
+            background: #fff;
+        }
+        #errToast {
+            position: fixed;
+            bottom: 1rem;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #7f1d1d;
+            border: 1px solid #ef4444;
+            color: #fca5a5;
+            padding: 8px 18px;
+            border-radius: 8px;
+            font-size: 0.84rem;
+            z-index: 9999;
+            display: none;
+        }
+
+        /* Quality special display */
+        #qualityVal { color: var(--accent); font-variant-numeric: tabular-nums; min-width: 72px; display: inline-block; font-weight: 700; text-align: right; font-size: 0.8rem; }
+
+        @media (max-width: 767px) {
+            .vs-badge { padding-top: 0; padding-left: 2px; padding-right: 2px; writing-mode: horizontal-tb; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- NAVBAR -->
+<nav class="navbar navbar-dark py-0 px-3 border-bottom" style="height:var(--navbar-h);background:#0d1117;border-color:var(--panel-border)!important;position:relative;">
+    <div class="d-flex align-items-center gap-2">
+        <span class="navbar-brand mb-0 fw-bold" style="font-size:0.95rem;letter-spacing:.04em;color:#e2e8f0;">
+            <i class="bi bi-arrow-left-right me-2 text-info"></i>Image Converter
+        </span>
+        <button id="clearConfigBtn" title="Reset settings to defaults" style="background:none;border:1px solid #ef444466;padding:4px 10px;cursor:pointer;color:#ef4444;font-size:1.15rem;line-height:1;border-radius:6px;transition:all 0.15s;display:flex;align-items:center;gap:6px;" onmouseover="this.style.background='rgba(239,68,68,0.15)';this.style.borderColor='#ef4444'" onmouseout="this.style.background='none';this.style.borderColor='#ef444466'">
+            <i class="bi bi-trash3-fill"></i><span style="font-size:0.75rem;font-weight:700;letter-spacing:0.04em;">Reset</span>
+        </button>
+        <button id="shortcutsBtn" title="Keyboard shortcuts (?)" style="background:none;border:1px solid #38bdf833;padding:4px 10px;cursor:pointer;color:#38bdf8;font-size:1rem;line-height:1;border-radius:6px;transition:all 0.15s;display:flex;align-items:center;gap:5px;" onmouseover="this.style.background='rgba(56,189,248,0.12)';this.style.borderColor='#38bdf8'" onmouseout="this.style.background='none';this.style.borderColor='#38bdf833'">
+            <i class="bi bi-keyboard"></i><span style="font-size:0.75rem;font-weight:700;letter-spacing:0.04em;">?</span>
+        </button>
+        <div id="metricsToggleWrap" class="toggle-wrap" title="Show SSIM / PSNR quality metrics after conversion" role="switch" aria-checked="true" tabindex="0">
+            <div class="toggle-track on" id="metricsTrack"><div class="toggle-thumb"></div></div>
+            <label style="font-size:0.75rem;font-weight:700;letter-spacing:0.04em;color:#cbd5e1;cursor:pointer;white-space:nowrap;">Metrics</label>
+        </div>
+        <div id="autoConvertWrap" class="toggle-wrap" title="Auto-convert on image load" role="switch" aria-checked="true" tabindex="0">
+            <div class="toggle-track on" id="autoConvertTrack"><div class="toggle-thumb"></div></div>
+            <label style="font-size:0.75rem;font-weight:700;letter-spacing:0.04em;color:#cbd5e1;cursor:pointer;white-space:nowrap;">Auto-convert</label>
+        </div>
+        <div id="autoConvertCountdown" style="display:none;align-items:center;justify-content:center;flex-shrink:0;position:relative;">
+            <svg width="34" height="34" viewBox="0 0 44 44" style="transform:rotate(-90deg);">
+                <circle cx="22" cy="22" r="18" fill="none" stroke="#2d3748" stroke-width="3.5"></circle>
+                <circle id="countdownRing" cx="22" cy="22" r="18" fill="none" stroke="#38bdf8" stroke-width="3.5" stroke-dasharray="113.1" stroke-dashoffset="0" stroke-linecap="round" style="transition:stroke-dashoffset 0.1s linear,stroke 0.3s;"></circle>
+            </svg>
+            <span id="countdownNum" style="position:absolute;font-size:0.72rem;font-weight:800;color:#e2e8f0;pointer-events:none;"></span>
+        </div>
+    </div>
+    <span id="infoBar" style="font-size:0.8rem;color:#94a3b8;">— open an image to begin</span>
+    <!-- Floating labels positioned above each image panel via JS -->
+    <span id="navOrigLabel" style="position:absolute;font-size:0.8rem;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:#cbd5e1;transform:translateX(-50%);pointer-events:none;">Original</span>
+    <span id="outLabel" data-nav-label="out"  style="position:absolute;font-size:0.8rem;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;transform:translateX(-50%);pointer-events:none;">Converted</span>
+</nav>
+
+<div class="main-scroll" style="overflow:hidden;">
+<div class="container-fluid px-1 py-0" style="height:calc(100vh - var(--navbar-h));display:flex;flex-direction:column;">
+<div class="row g-1" style="flex:1;min-height:0;margin:0;">
+
+    <!-- ── SIDEBAR ── -->
+    <div class="col-12 col-lg-3 col-xl-2" style="height:100%;padding:0;overflow-x:hidden;">
+        <div class="sticky-panel">
+
+            <!-- Drop zone -->
+            <div class="card panel-card border mb-2">
+                <div class="card-header panel-header py-2 px-3">
+                    <span class="section-label mb-0"><i class="bi bi-folder2-open me-1"></i>Source Image</span>
+                </div>
+                <div class="card-body p-2">
+                    <div id="dropZone">
+                        <input type="file" id="imageLoader" accept="image/*" style="display:none">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="bi bi-cloud-upload" style="font-size:1.3rem;color:#38bdf8;"></i>
+                            <div>
+                                <div style="font-size:0.8rem;font-weight:600;color:#e2e8f0;">Drop or click to open</div>
+                                <div class="drop-hint"><i class="bi bi-info-circle"></i> Any raster format</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Convert + Download -->
+            <div class="d-grid gap-2 mb-2">
+                <button id="convertBtn" class="btn btn-sm" disabled>
+                    <i class="bi bi-arrow-repeat me-1"></i>Convert
+                </button>
+                <button id="downloadBtn" class="btn btn-sm" disabled>
+                    <i class="bi bi-download me-1"></i>Download
+                </button>
+            </div>
+
+            <!-- Output format -->
+            <div class="card panel-card border mb-2">
+                <div class="card-header panel-header py-2 px-3 d-flex justify-content-between align-items-center">
+                    <span class="section-label mb-0"><i class="bi bi-file-earmark-arrow-right me-1"></i>Output Format</span>
+                    <div id="autoConvertCountdown4" style="display:none;align-items:center;justify-content:center;flex-shrink:0;position:relative;">
+                        <svg width="26" height="26" viewBox="0 0 44 44" style="transform:rotate(-90deg);">
+                            <circle cx="22" cy="22" r="18" fill="none" stroke="#2d3748" stroke-width="3.5"></circle>
+                            <circle id="countdownRing4" cx="22" cy="22" r="18" fill="none" stroke="#38bdf8" stroke-width="3.5" stroke-dasharray="113.1" stroke-dashoffset="0" stroke-linecap="round" style="transition:stroke-dashoffset 0.1s linear,stroke 0.3s;"></circle>
+                        </svg>
+                        <span id="countdownNum4" style="position:absolute;font-size:0.62rem;font-weight:800;color:#e2e8f0;pointer-events:none;"></span>
+                    </div>
+                </div>
+                <div class="card-body p-2">
+                    <div class="d-flex flex-wrap gap-1 mb-1" id="fmtRow">
+                        <button class="fmt-pill" data-fmt="avif">AVIF</button>
+                        <button class="fmt-pill active" data-fmt="webp">WebP</button>
+                        <button class="fmt-pill" data-fmt="jpeg">JPEG</button>
+                        <button class="fmt-pill" data-fmt="mozjpeg">MozJPEG</button>
+                        <button class="fmt-pill" data-fmt="png">PNG</button>
+                    </div>
+                    <small id="fmtNote" style="font-size:0.73rem;color:#94a3b8;">AVIF — best compression, wide support</small>
+                </div>
+            </div>
+
+            <!-- Quality -->
+            <div class="card panel-card border mb-2" id="qualityCard">
+                <div class="card-header panel-header py-2 px-3 d-flex justify-content-between align-items-center">
+                    <span class="section-label mb-0"><i class="bi bi-sliders me-1"></i>Quality</span>
+                    <div class="d-flex align-items-center gap-2">
+                        <div id="autoConvertCountdown3" style="display:none;align-items:center;justify-content:center;flex-shrink:0;position:relative;">
+                            <svg width="26" height="26" viewBox="0 0 44 44" style="transform:rotate(-90deg);">
+                                <circle cx="22" cy="22" r="18" fill="none" stroke="#2d3748" stroke-width="3.5"></circle>
+                                <circle id="countdownRing3" cx="22" cy="22" r="18" fill="none" stroke="#38bdf8" stroke-width="3.5" stroke-dasharray="113.1" stroke-dashoffset="0" stroke-linecap="round" style="transition:stroke-dashoffset 0.1s linear,stroke 0.3s;"></circle>
+                            </svg>
+                            <span id="countdownNum3" style="position:absolute;font-size:0.62rem;font-weight:800;color:#e2e8f0;pointer-events:none;"></span>
+                        </div>
+                        <span id="qualityVal">80</span>
+                    </div>
+                </div>
+                <div class="card-body p-2">
+                    <input type="range" class="form-range" id="qualityRange" min="0" max="100" step="5" value="80">
+                    <div class="d-flex justify-content-between" style="font-size:0.68rem;color:#94a3b8;margin-top:-2px;">
+                        <span>0 – smallest</span><span>100 – best</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Speed (effort) -->
+            <div class="card panel-card border mb-2" id="speedCard">
+                <div class="card-header panel-header py-2 px-3">
+                    <span class="section-label mb-0"><i class="bi bi-speedometer2 me-1"></i>Effort / Speed</span>
+                </div>
+                <div class="card-body p-2">
+                    <div class="d-flex gap-1" id="speedRow">
+                        <button class="speed-pill active" data-speed="1" title="Fastest – lowest compression ratio">1<br><span style="font-size:0.62rem;opacity:.85;">fast</span></button>
+                        <button class="speed-pill" data-speed="2">2</button>
+                        <button class="speed-pill" data-speed="3">3<br><span style="font-size:0.62rem;opacity:.85;">bal</span></button>
+                        <button class="speed-pill" data-speed="4">4</button>
+                        <button class="speed-pill" data-speed="5" title="Slowest – best compression ratio">5<br><span style="font-size:0.62rem;opacity:.85;">slow</span></button>
+                    </div>
+                    <small id="speedNote" style="font-size:0.73rem;color:#94a3b8;margin-top:4px;display:block;">Higher = smaller file, slower encode</small>
+                </div>
+            </div>
+
+            <!-- Max file size target -->
+            <div class="card panel-card border mb-2" id="maxSizeCard">
+                <div class="card-header panel-header py-2 px-3 d-flex justify-content-between align-items-center">
+                    <span class="section-label mb-0"><i class="bi bi-file-earmark-zip me-1"></i>Max File Size</span>
+                    <div class="toggle-wrap" id="maxSizeToggleWrap" title="Reduce quality until output fits" role="switch" aria-checked="false" tabindex="0" style="margin-bottom:0;">
+                        <div class="toggle-track" id="maxSizeTrack"><div class="toggle-thumb"></div></div>
+                    </div>
+                </div>
+                <div class="card-body p-2" id="maxSizeBody" style="display:none;">
+                    <div class="d-flex gap-1 flex-wrap" id="maxSizePresets">
+                        <button class="speed-pill" data-bytes="102400">100 KB</button>
+                        <button class="speed-pill" data-bytes="262144">256 KB</button>
+                        <button class="speed-pill" data-bytes="524288">512 KB</button>
+                        <button class="speed-pill" data-bytes="1048576">1 MB</button>
+                        <button class="speed-pill" data-bytes="2097152">2 MB</button>
+                    </div>
+                    <div class="d-flex align-items-center gap-2 mt-2">
+                        <input type="number" id="maxSizeInput" min="1" placeholder="KB" style="width:80px;background:#1e2535;border:1px solid var(--panel-border);border-radius:5px;color:#f1f5f9;font-size:0.8rem;padding:3px 7px;">
+                        <span style="font-size:0.75rem;color:#94a3b8;">KB custom</span>
+                    </div>
+                    <div id="maxSizeStatus" style="font-size:0.73rem;margin-top:5px;display:none;"></div>
+                </div>
+            </div>
+
+            <!-- Progress -->
+            <div id="progressWrap" class="mb-2">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <small id="progressLabel" style="color:#cbd5e1;font-size:0.75rem;">Encoding…</small>
+                    <small id="progressPct" style="color:var(--accent);font-size:0.75rem;font-variant-numeric:tabular-nums;">0%</small>
+                </div>
+                <div class="progress"><div class="progress-bar" id="progressBar" style="width:0%"></div></div>
+            </div>
+
+            <!-- Stats -->
+            <div id="statsWrap" style="display:none;">
+                <div class="row g-1 mb-1">
+                    <div class="col-6"><div class="stat-box"><div class="stat-val" id="statOrigSize">—</div><div class="stat-lbl">Original</div></div></div>
+                    <div class="col-6"><div class="stat-box"><div class="stat-val" id="statOutSize">—</div><div class="stat-lbl">Output</div></div></div>
+                </div>
+                <div class="row g-1 mb-1">
+                    <div class="col-6"><div class="stat-box"><div class="stat-val" id="statSavings">—</div><div class="stat-lbl">Savings</div></div></div>
+                    <div class="col-6"><div class="stat-box"><div class="stat-val" id="statTime">—</div><div class="stat-lbl">Encode ms</div></div></div>
+                </div>
+                <div class="row g-1" id="statsMetricsRow">
+                    <div class="col-6"><div class="stat-box"><div class="stat-val" id="statSSIM">—</div><div class="stat-lbl">SSIM</div></div></div>
+                    <div class="col-6"><div class="stat-box"><div class="stat-val" id="statPSNR">—</div><div class="stat-lbl">PSNR (dB)</div></div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── PREVIEW AREA ── -->
+    <div class="col-12 col-lg-9 col-xl-10" style="height:100%;padding:0 0 0 4px;">
+        <div class="card panel-card border shadow-sm d-flex flex-column" style="height:calc(100vh - var(--navbar-h));overflow:hidden;">
+            <div class="card-header panel-header py-1 px-3 d-flex align-items-center justify-content-between gap-2" style="position:relative;">
+                <div id="autoConvertCountdown2" style="display:none;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);align-items:center;justify-content:center;pointer-events:none;z-index:1;">
+                    <svg width="34" height="34" viewBox="0 0 44 44" style="transform:rotate(-90deg);">
+                        <circle cx="22" cy="22" r="18" fill="none" stroke="#2d3748" stroke-width="3.5"></circle>
+                        <circle id="countdownRing2" cx="22" cy="22" r="18" fill="none" stroke="#38bdf8" stroke-width="3.5" stroke-dasharray="113.1" stroke-dashoffset="0" stroke-linecap="round" style="transition:stroke-dashoffset 0.1s linear,stroke 0.3s;"></circle>
+                    </svg>
+                    <span id="countdownNum2" style="position:absolute;font-size:0.72rem;font-weight:800;color:#e2e8f0;pointer-events:none;"></span>
+                </div>
+                <div class="d-flex align-items-center gap-3 min-w-0" style="overflow:hidden;">
+                    <h6 class="mb-0 fw-bold text-info text-uppercase flex-shrink-0" style="letter-spacing:.07em;font-size:0.95rem;">
+                        <i class="bi bi-layout-split me-2"></i>Preview
+                    </h6>
+                    <span id="dimLabel" style="font-size:0.9rem;color:#cbd5e1;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></span>
+                </div>
+                <div class="d-flex align-items-center gap-3 flex-shrink-0">
+                    <button id="copyOutputBtn" title="Copy output to clipboard" disabled style="background:none;border:none;padding:3px 5px;cursor:pointer;color:rgb(6,116,142);font-size:1.1rem;line-height:1;border-radius:5px;transition:all 0.15s;opacity:0.4;" onmouseover="if(!this.disabled)this.style.background='rgba(6,116,142,0.15)'" onmouseout="this.style.background='none'">
+                        <i class="bi bi-clipboard"></i>
+                    </button>
+                    <div class="d-flex align-items-center gap-1" style="font-size:0.9rem;color:#cbd5e1;">
+                        <i class="bi bi-square-half"></i>
+                        <span>Original <span id="origFmtLabel" style="font-weight:700;"></span></span>
+                        <span style="color:#64748b;margin:0 4px;">vs</span>
+                        <span id="fmtLabel" style="color:var(--accent);font-weight:700;">AVIF</span>
+                    </div>
+                    <div id="zoomBar">
+                        <button class="zoom-btn" id="zoomOut" title="Zoom out (−)"><i class="bi bi-dash"></i></button>
+                        <span id="zoomLabel">100%</span>
+                        <button class="zoom-btn" id="zoomIn"  title="Zoom in (+)"><i class="bi bi-plus"></i></button>
+                        <button class="zoom-btn" id="zoomReset" title="Fit image (0)" style="font-size:0.65rem;width:32px;letter-spacing:-0.02em;">Fit</button>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body p-1 flex-grow-1 d-flex flex-column" style="min-height:0;overflow:hidden;">
+
+                <!-- Comparison row -->
+                <div id="previewRow" class="d-flex gap-1 h-100" style="min-height:0;">
+
+                    <!-- Original -->
+                    <div class="preview-wrap">
+                        <div class="preview-img-box checkered-bg" id="origBox">
+                            <div class="preview-viewport" id="origViewport">
+                                <img id="origImg" src="" alt="Original" style="display:none;">
+                            </div>
+                            <!-- Drop overlay shown when no image loaded -->
+                            <div id="origDropOverlay" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;pointer-events:none;transition:background 0.15s;">
+                                <i class="bi bi-cloud-upload" style="font-size:2.5rem;color:#38bdf8;"></i>
+                                <p style="color:#cbd5e1;font-size:0.9rem;margin:0;font-weight:600;">Drop image here</p>
+                                <p style="color:#94a3b8;font-size:0.8rem;margin:0;">or use the sidebar picker</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="vs-badge">VS</div>
+
+                    <!-- Output -->
+                    <div class="preview-wrap">
+                        <div class="preview-img-box checkered-bg" id="outImgBox">
+                            <div class="preview-viewport" id="outViewport">
+                                <img id="outImg" src="" alt="Converted" style="display:none;">
+                            </div>
+                            <div id="outDropOverlay" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;pointer-events:none;transition:background 0.15s;">
+                                <i class="bi bi-cloud-upload" style="font-size:2.5rem;color:#38bdf8;"></i>
+                                <p style="color:#cbd5e1;font-size:0.9rem;margin:0;font-weight:600;">Drop image here</p>
+                                <p style="color:#94a3b8;font-size:0.8rem;margin:0;">or use the sidebar picker</p>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+</div>
+</div>
+
+<div id="errToast"></div>
+
+<!-- Keyboard shortcuts modal -->
+<div id="shortcutsModal" style="display:none;position:fixed;inset:0;z-index:9998;align-items:center;justify-content:center;">
+    <div style="position:absolute;inset:0;background:rgba(0,0,0,0.6);" id="shortcutsBackdrop"></div>
+    <div style="position:relative;z-index:1;background:#161b22;border:1px solid #2d3748;border-radius:12px;padding:0;width:780px;max-width:96vw;box-shadow:0 24px 64px rgba(0,0,0,0.6);">
+        <div style="background:#1a2030;border-bottom:1px solid #2d3748;padding:11px 20px;display:flex;align-items:center;justify-content:space-between;border-radius:12px 12px 0 0;">
+            <span style="font-weight:700;font-size:0.95rem;letter-spacing:0.05em;color:#e2e8f0;"><i class="bi bi-keyboard me-2 text-info"></i>Keyboard Shortcuts</span>
+            <button id="shortcutsClose" style="background:none;border:none;color:#94a3b8;font-size:1.3rem;cursor:pointer;padding:0 4px;line-height:1;" title="Close (Esc)">&times;</button>
+        </div>
+        <div style="padding:16px 20px;display:grid;grid-template-columns:1fr 1fr;gap:0 28px;">
+
+            <!-- Left column -->
+            <div>
+                <div class="kb-section">File</div>
+                <div class="kb-row"><span class="kb-desc">Open file picker</span><span class="kb-keys"><kbd>O</kbd></span></div>
+                <div class="kb-row"><span class="kb-desc">Paste image from clipboard</span><span class="kb-keys"><kbd>Ctrl</kbd>+<kbd>V</kbd></span></div>
+
+                <div class="kb-section" style="margin-top:14px;">Convert &amp; Export</div>
+                <div class="kb-row"><span class="kb-desc">Convert</span><span class="kb-keys"><kbd>Enter</kbd></span></div>
+                <div class="kb-row"><span class="kb-desc">Download output</span><span class="kb-keys"><kbd>D</kbd></span></div>
+                <div class="kb-row"><span class="kb-desc">Copy output to clipboard</span><span class="kb-keys"><kbd>C</kbd></span></div>
+                <div class="kb-row"><span class="kb-desc">Toggle auto-convert</span><span class="kb-keys"><kbd>A</kbd></span></div>
+
+                <div class="kb-section" style="margin-top:14px;">Quality</div>
+                <div class="kb-row"><span class="kb-desc">Quality +5</span><span class="kb-keys"><kbd>↑</kbd></span></div>
+                <div class="kb-row" style="border-bottom:none;"><span class="kb-desc">Quality −5</span><span class="kb-keys"><kbd>↓</kbd></span></div>
+            </div>
+
+            <!-- Right column -->
+            <div>
+                <div class="kb-section">Format</div>
+                <div class="kb-row"><span class="kb-desc">Switch to AVIF</span><span class="kb-keys"><kbd>1</kbd></span></div>
+                <div class="kb-row"><span class="kb-desc">Switch to WEBP</span><span class="kb-keys"><kbd>2</kbd></span></div>
+                <div class="kb-row"><span class="kb-desc">Switch to JPEG</span><span class="kb-keys"><kbd>3</kbd></span></div>
+                <div class="kb-row"><span class="kb-desc">Switch to MOZJPEG</span><span class="kb-keys"><kbd>4</kbd></span></div>
+                <div class="kb-row"><span class="kb-desc">Switch to PNG</span><span class="kb-keys"><kbd>5</kbd></span></div>
+
+                <div class="kb-section" style="margin-top:14px;">View</div>
+                <div class="kb-row"><span class="kb-desc">Zoom in</span><span class="kb-keys"><kbd>+</kbd></span></div>
+                <div class="kb-row"><span class="kb-desc">Zoom out</span><span class="kb-keys"><kbd>−</kbd></span></div>
+                <div class="kb-row"><span class="kb-desc">Fit / reset zoom</span><span class="kb-keys"><kbd>0</kbd></span></div>
+                <div class="kb-row"><span class="kb-desc">Toggle metrics</span><span class="kb-keys"><kbd>M</kbd></span></div>
+                <div class="kb-row"><span class="kb-desc">Show this panel</span><span class="kb-keys"><kbd>?</kbd></span></div>
+                <div class="kb-row" style="border-bottom:none;"><span class="kb-desc">Close panel</span><span class="kb-keys"><kbd>Esc</kbd></span></div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<style>
+.kb-section { font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#64748b;margin-bottom:4px; }
+.kb-row { display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid #1e2535; }
+.kb-desc { font-size:0.82rem;color:#cbd5e1; }
+.kb-keys { display:flex;align-items:center;gap:3px;flex-shrink:0; }
+kbd { display:inline-flex;align-items:center;justify-content:center;background:#1e2535;border:1px solid #374151;border-bottom-width:2px;border-radius:4px;color:#e2e8f0;font-family:inherit;font-size:0.72rem;font-weight:700;padding:2px 7px;min-width:22px;text-align:center; }
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script type="module">
+// ── jsquash encode-only via esm.sh ──────────────────────────────────────────
+// esm.sh rewrites bare specifiers (wasm-feature-detect, etc.) server-side.
+// Each codec module's default export IS the encode / optimise function.
+// We skip jsquash decode entirely and use the browser's canvas API instead —
+// it handles every source format the browser can display (JPEG, PNG, WebP,
+// AVIF, GIF, BMP, TIFF…) without any extra WASM.
+import avifEncode from 'https://esm.sh/@jsquash/avif@2.1.1/encode';
+import webpEncode from 'https://esm.sh/@jsquash/webp@1.5.0/encode';
+import jpegEncode from 'https://esm.sh/@jsquash/jpeg@1.6.0/encode';
+import pngEncode  from 'https://esm.sh/@jsquash/png@3.1.1/encode';
+import { optimise } from 'https://esm.sh/@jsquash/oxipng@2.3.0';
+
+// ─── Persistence ───────────────────────────────────────────────────────────
+const LS_KEY = 'imgconv_config';
+
+function loadConfig() {
+    try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch { return {}; }
+}
+function saveConfig() {
+    try { localStorage.setItem(LS_KEY, JSON.stringify({ outputFmt, qualityVal, speedVal, autoConvert })); } catch {}
+}
+function clearConfig() {
+    try { localStorage.removeItem(LS_KEY); } catch {}
+}
+
+// ─── State ─────────────────────────────────────────────────────────────────
+let sourceFile   = null;   // original File object
+let sourceImgData = null;  // ImageData from source
+let outputBlob   = null;   // last converted result
+let lastEncodeMs = null;   // encode duration in ms
+let lastUsedQuality = null; // actual quality used (may differ when max-size search runs)
+let lastSSIM = null;
+let lastPSNR = null;
+
+const _cfg = loadConfig();
+let outputFmt   = _cfg.outputFmt  || 'webp';
+let qualityVal  = _cfg.qualityVal != null ? _cfg.qualityVal : 80;
+let speedVal    = _cfg.speedVal   || 1;
+let autoConvert = _cfg.autoConvert != null ? _cfg.autoConvert : true;
+
+// ─── DOM refs ──────────────────────────────────────────────────────────────
+const dropZone     = document.getElementById('dropZone');
+const imageLoader  = document.getElementById('imageLoader');
+const convertBtn   = document.getElementById('convertBtn');
+const downloadBtn  = document.getElementById('downloadBtn');
+const copyOutputBtn= document.getElementById('copyOutputBtn');
+const qualityRange = document.getElementById('qualityRange');
+const qualityDisp  = document.getElementById('qualityVal');
+const qualityCard  = document.getElementById('qualityCard');
+const speedCard    = document.getElementById('speedCard');
+const fmtNote      = document.getElementById('fmtNote');
+const fmtLabel     = document.getElementById('fmtLabel');
+const outLabel     = document.getElementById('outLabel');
+const infoBar      = document.getElementById('infoBar');
+const dimLabel     = document.getElementById('dimLabel');
+
+function updateDimLabel() {
+    const img = document.getElementById('origImg');
+    if (!img || !img.naturalWidth) { dimLabel.innerHTML = ''; return; }
+
+    const w = img.naturalWidth, h = img.naturalHeight;
+    const ratio = (w / h).toFixed(2);
+    // source ext from file name
+    const ext = sourceFile ? sourceFile.name.split('.').pop().toUpperCase() : '';
+    const fname = sourceFile ? sourceFile.name : '';
+    const origSize = sourceFile ? sourceFile.size : 0;
+
+    // Build format label from active output format
+    const m = FMT_META[outputFmt];
+    const fmtName = m ? m.label : outputFmt.toUpperCase();
+
+    // Update "Original JPEG vs WebP" in the header
+    const origFmtLabelEl = document.getElementById('origFmtLabel');
+    if (origFmtLabelEl) origFmtLabelEl.textContent = ext || '';
+
+    const fmtColor = m ? m.color : 'var(--accent)';
+    // Derive source format colour from extension
+    const srcColorMap = { AVIF:'#4ade80', WEBP:'#38bdf8', JPEG:'#fbbf24', JPG:'#fbbf24', PNG:'#facc15', MOZJPEG:'#fbbf24' };
+    const srcColor = srcColorMap[ext] || '#94a3b8';
+    // Also colour origFmtLabel
+    if (origFmtLabelEl) origFmtLabelEl.style.color = srcColor;
+
+    let html = `<span style="color:${srcColor};font-weight:700;">${ext}</span>`
+             + `<span style="color:#64748b;margin:0 5px;">→</span>`
+             + `<span style="color:${fmtColor};font-weight:700;">${fmtName}</span>`
+             + (outputBlob && lastUsedQuality != null && FMT_META[outputFmt]?.hasQuality
+                 ? `<span style="color:#64748b;font-weight:700;"> Q${lastUsedQuality}</span>`
+                 : '')
+             + `<span style="color:#64748b;margin:0 4px;">·</span>`
+             + `<span style="color:#94a3b8;">${fname}</span>`
+             + `<span style="color:#64748b;margin:0 4px;">·</span>`
+             + `${w} × ${h}px`
+             + `<span style="color:#64748b;"> (${ratio})</span>`;
+
+    if (outputBlob) {
+        const pct = Math.round(outputBlob.size / origSize * 100);
+        const saved = 100 - pct;
+        const sizeColor = saved >= 0 ? '#22c55e' : '#f87171';
+        const sign = saved >= 0 ? '−' : '+';
+        html += `<span style="color:#64748b;margin:0 5px;">·</span>`
+              + `${fmtBytes(origSize)}`
+              + `<span style="color:#64748b;margin:0 5px;">→</span>`
+              + `${fmtBytes(outputBlob.size)}`
+              + `<span style="color:${sizeColor};margin-left:5px;">${sign}${Math.abs(saved)}%</span>`
+              + (lastEncodeMs != null
+                  ? `<span style="color:#64748b;margin:0 5px;">·</span><span style="color:#a78bfa;">${(lastEncodeMs/1000).toFixed(2)}s</span>`
+                  : '');
+        if (metricsEnabled && lastSSIM != null && lastPSNR != null) {
+            const ssimColor = lastSSIM > 0.98 ? '#22c55e' : lastSSIM > 0.95 ? '#86efac' : lastSSIM > 0.90 ? '#fbbf24' : '#f87171';
+            const psnrColor = lastPSNR > 45 ? '#22c55e' : lastPSNR > 38 ? '#86efac' : lastPSNR > 30 ? '#fbbf24' : '#f87171';
+            html += `<span style="color:#64748b;margin:0 5px;">·</span>`
+                  + `<span style="color:${ssimColor};font-variant-numeric:tabular-nums;">${lastSSIM.toFixed(4)}</span>`
+                  + `<span style="color:#64748b;margin:0 4px;"> </span>`
+                  + (lastPSNR === Infinity
+                      ? `<span style="color:#22c55e;">∞ dB</span>`
+                      : `<span style="color:${psnrColor};font-variant-numeric:tabular-nums;">${lastPSNR.toFixed(1)}dB</span>`);
+        }
+    } else {
+        html += `<span style="color:#64748b;margin:0 5px;">·</span>${fmtBytes(origSize)}`;
+    }
+
+    dimLabel.innerHTML = html;
+}
+const origImg      = document.getElementById('origImg');
+const outImg       = document.getElementById('outImg');
+
+const progressWrap = document.getElementById('progressWrap');
+const progressBar  = document.getElementById('progressBar');
+const progressLabel= document.getElementById('progressLabel');
+const progressPct  = document.getElementById('progressPct');
+const statsWrap    = document.getElementById('statsWrap');
+const statOrigSize = document.getElementById('statOrigSize');
+const statOutSize  = document.getElementById('statOutSize');
+const statSavings  = document.getElementById('statSavings');
+const statTime     = document.getElementById('statTime');
+const statSSIM     = document.getElementById('statSSIM');
+const statPSNR     = document.getElementById('statPSNR');
+const errToast     = document.getElementById('errToast');
+
+// ─── Format metadata ───────────────────────────────────────────────────────
+const FMT_META = {
+    avif:    { label:'AVIF',    color:'#4ade80', note:'Best compression, wide support (Chrome/Firefox/Safari)', mime:'image/avif',    ext:'avif',  hasQuality:true,  hasSpeed:true  },
+    webp:    { label:'WEBP',    color:'#38bdf8', note:'Excellent quality/size balance, universal support',      mime:'image/webp',    ext:'webp',  hasQuality:true,  hasSpeed:true  },
+    jpeg:    { label:'JPEG',    color:'#fbbf24', note:'Classic format, broad compatibility',                    mime:'image/jpeg',    ext:'jpg',   hasQuality:true,  hasSpeed:false },
+    mozjpeg: { label:'MOZJPEG', color:'#fbbf24', note:'Optimized JPEG — smaller files than standard JPEG',     mime:'image/jpeg',    ext:'jpg',   hasQuality:true,  hasSpeed:false },
+    png:     { label:'PNG',     color:'#facc15', note:'Lossless, best for graphics/screenshots',                mime:'image/png',     ext:'png',   hasQuality:false, hasSpeed:true  },
+};
+
+// ─── Quality preset map ────────────────────────────────────────────────────
+// Key = target % (slider value). Values = encoder-specific params.
+// avif: cqLevel (0=best, 63=worst); webp/mozjpeg/jpeg: quality (0–100)
+const QUALITY_PRESETS = {
+    100: { name: 'Lossless', avif: 0,  webp: 100, mozjpeg: 100, jpeg: 100 },
+     95: { name: 'Q95',      avif: 4,  webp:  95, mozjpeg:  95, jpeg:  96 },
+     90: { name: 'Maximum',  avif: 8,  webp:  90, mozjpeg:  90, jpeg:  92 },
+     85: { name: 'Q85',      avif: 12, webp:  85, mozjpeg:  85, jpeg:  87 },
+     80: { name: 'High',     avif: 16, webp:  80, mozjpeg:  80, jpeg:  82 },
+     75: { name: 'Q75',      avif: 20, webp:  75, mozjpeg:  75, jpeg:  78 },
+     70: { name: 'Q70',      avif: 24, webp:  70, mozjpeg:  70, jpeg:  73 },
+     65: { name: 'Standard', avif: 28, webp:  65, mozjpeg:  65, jpeg:  68 },
+     60: { name: 'Q60',      avif: 32, webp:  60, mozjpeg:  60, jpeg:  63 },
+     55: { name: 'Q55',      avif: 34, webp:  55, mozjpeg:  56, jpeg:  59 },
+     50: { name: 'Medium',   avif: 36, webp:  50, mozjpeg:  52, jpeg:  55 },
+     45: { name: 'Q45',      avif: 40, webp:  45, mozjpeg:  47, jpeg:  50 },
+     40: { name: 'Q40',      avif: 43, webp:  40, mozjpeg:  42, jpeg:  45 },
+     35: { name: 'Q35',      avif: 46, webp:  35, mozjpeg:  38, jpeg:  41 },
+     30: { name: 'Low',      avif: 48, webp:  30, mozjpeg:  35, jpeg:  38 },
+     25: { name: 'Q25',      avif: 51, webp:  25, mozjpeg:  29, jpeg:  32 },
+     20: { name: 'Q20',      avif: 54, webp:  20, mozjpeg:  23, jpeg:  25 },
+     15: { name: 'Min',      avif: 56, webp:  15, mozjpeg:  18, jpeg:  20 },
+     10: { name: 'Q10',      avif: 59, webp:  10, mozjpeg:  12, jpeg:  14 },
+      5: { name: 'Draft',    avif: 62, webp:   5, mozjpeg:   8, jpeg:  10 },
+      0: { name: 'Worst',    avif: 63, webp:   1, mozjpeg:   1, jpeg:   1 },
+};
+
+/** Return the encoder-native quality value for the current format & preset. */
+function resolveQuality(targetPct, fmt) {
+    const row = QUALITY_PRESETS[targetPct] ?? QUALITY_PRESETS[80];
+    if (fmt === 'avif')    return row.avif;
+    if (fmt === 'webp')    return row.webp;
+    if (fmt === 'mozjpeg') return row.mozjpeg;
+    if (fmt === 'jpeg')    return row.jpeg;
+    return row.webp; // fallback
+}
+
+// ─── Format pills ──────────────────────────────────────────────────────────
+document.querySelectorAll('.fmt-pill').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.fmt-pill').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        outputFmt = btn.dataset.fmt;
+        saveConfig();
+        updateFmtUI();
+        if (autoConvert && sourceImgData) scheduleAutoConvert();
+    });
+});
+
+function updateFmtUI() {
+    const m = FMT_META[outputFmt];
+    fmtNote.textContent = m.note;
+    fmtLabel.textContent = m.label;
+    fmtLabel.style.color = m.color;
+    outLabel.textContent = `Converted (${m.label})`;
+    outLabel.style.color = m.color;
+    qualityCard.style.display = m.hasQuality ? '' : 'none';
+    speedCard.style.display   = m.hasSpeed   ? '' : 'none';
+    // Reset output when format changes
+    outputBlob = null;
+    lastEncodeMs = null;
+    lastSSIM = null;
+    lastPSNR = null;
+    outImg.style.display = 'none';
+    downloadBtn.disabled = true;
+        copyOutputBtn.disabled = true; copyOutputBtn.style.opacity = "0.4";
+    statsWrap.style.display = 'none';
+    updateDimLabel();
+}
+// Restore active format pill from saved config
+document.querySelectorAll('.fmt-pill').forEach(b => {
+    b.classList.toggle('active', b.dataset.fmt === outputFmt);
+});
+function updateQualityDisp(val) {
+    const preset = QUALITY_PRESETS[val];
+    const name = preset ? preset.name : val;
+    qualityDisp.textContent = name + ' · ' + val;
+}
+
+// Restore quality slider
+qualityRange.value = qualityVal;
+updateQualityDisp(qualityVal);
+
+updateFmtUI();
+
+// ─── Quality range ─────────────────────────────────────────────────────────
+qualityRange.addEventListener('input', () => {
+    qualityVal = parseInt(qualityRange.value);
+    updateQualityDisp(qualityVal);
+    saveConfig();
+    if (autoConvert && sourceImgData) scheduleAutoConvert();
+});
+
+// ─── Speed pills ───────────────────────────────────────────────────────────
+// Restore active speed pill
+document.querySelectorAll('.speed-pill').forEach(b => {
+    b.classList.toggle('active', parseInt(b.dataset.speed) === speedVal);
+});
+
+// Restore auto-convert toggle
+const autoConvertWrap  = document.getElementById('autoConvertWrap');
+const autoConvertTrack = document.getElementById('autoConvertTrack');
+function setAutoConvert(val) {
+    autoConvert = val;
+    autoConvertTrack.classList.toggle('on', val);
+    autoConvertWrap.setAttribute('aria-checked', val);
+    saveConfig();
+}
+setAutoConvert(autoConvert);
+autoConvertWrap.addEventListener('click', () => setAutoConvert(!autoConvert));
+autoConvertWrap.addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setAutoConvert(!autoConvert); } });
+
+// ─── Metrics toggle ────────────────────────────────────────────────────────
+let metricsEnabled = true;
+const metricsToggleWrap = document.getElementById('metricsToggleWrap');
+const metricsTrack      = document.getElementById('metricsTrack');
+function setMetrics(val) {
+    metricsEnabled = val;
+    metricsTrack.classList.toggle('on', val);
+    metricsToggleWrap.setAttribute('aria-checked', val);
+    const wrap = document.getElementById('statsMetricsRow');
+    if (wrap) wrap.style.display = val ? '' : 'none';
+}
+metricsToggleWrap.addEventListener('click', () => setMetrics(!metricsEnabled));
+metricsToggleWrap.addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setMetrics(!metricsEnabled); } });
+
+document.querySelectorAll('.speed-pill').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.speed-pill').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        speedVal = parseInt(btn.dataset.speed);
+        saveConfig();
+        if (autoConvert && sourceImgData) scheduleAutoConvert();
+    });
+});
+
+// ─── Debounced auto-convert with countdown ────────────────────────────────
+let _autoConvertTimer   = null;
+let _countdownInterval  = null;
+const AUTO_CONVERT_DELAY = 1000; // ms
+
+function scheduleAutoConvert() {
+    clearTimeout(_autoConvertTimer);
+    clearInterval(_countdownInterval);
+
+    const TOTAL = AUTO_CONVERT_DELAY / 1000;
+    const CIRCUMFERENCE = 113.1;
+    const ring  = document.getElementById('countdownRing');
+    const num   = document.getElementById('countdownNum');
+    const wrap  = document.getElementById('autoConvertCountdown');
+    const ring2 = document.getElementById('countdownRing2');
+    const num2  = document.getElementById('countdownNum2');
+    const wrap2 = document.getElementById('autoConvertCountdown2');
+    const ring3 = document.getElementById('countdownRing3');
+    const num3  = document.getElementById('countdownNum3');
+    const wrap3 = document.getElementById('autoConvertCountdown3');
+    const ring4 = document.getElementById('countdownRing4');
+    const num4  = document.getElementById('countdownNum4');
+    const wrap4 = document.getElementById('autoConvertCountdown4');
+
+    const startTime = performance.now();
+
+    function tickRing() {
+        const elapsed   = (performance.now() - startTime) / 1000;
+        const remaining = Math.max(0, TOTAL - elapsed);
+        const frac   = remaining / TOTAL;
+        const offset = CIRCUMFERENCE * (1 - frac);
+        const color  = remaining > 0.5 ? '#38bdf8' : '#fbbf24';
+        const label  = remaining > 0 ? Math.ceil(remaining) : '';
+        ring.style.strokeDashoffset  = offset;
+        ring.style.stroke            = color;
+        num.textContent              = label;
+        if (ring2) { ring2.style.strokeDashoffset = offset; ring2.style.stroke = color; }
+        if (num2)  { num2.textContent = label; }
+        if (ring3) { ring3.style.strokeDashoffset = offset; ring3.style.stroke = color; }
+        if (num3)  { num3.textContent = label; }
+        if (ring4) { ring4.style.strokeDashoffset = offset; ring4.style.stroke = color; }
+        if (num4)  { num4.textContent = label; }
+    }
+
+    wrap.style.display = 'flex';
+    if (wrap2) wrap2.style.display = 'flex';
+    if (wrap3) wrap3.style.display = 'flex';
+    if (wrap4) wrap4.style.display = 'flex';
+    tickRing();
+
+    _countdownInterval = setInterval(() => {
+        tickRing();
+        const elapsed = (performance.now() - startTime) / 1000;
+        if (elapsed >= TOTAL) clearInterval(_countdownInterval);
+    }, 50);
+
+    _autoConvertTimer = setTimeout(() => {
+        clearInterval(_countdownInterval);
+        wrap.style.display = 'none';
+        if (wrap2) wrap2.style.display = 'none';
+        if (wrap3) wrap3.style.display = 'none';
+        if (wrap4) wrap4.style.display = 'none';
+        convertBtn.click();
+    }, AUTO_CONVERT_DELAY);
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────
+function fmtBytes(b) {
+    if (b < 1024) return b + ' B';
+    if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+    return (b/1048576).toFixed(2) + ' MB';
+}
+
+function showError(msg) {
+    errToast.textContent = '⚠ ' + msg;
+    errToast.style.display = 'block';
+    setTimeout(() => { errToast.style.display = 'none'; }, 5000);
+}
+
+function setProgress(pct, label) {
+    progressBar.style.width = pct + '%';
+    progressPct.textContent = pct + '%';
+    if (label) progressLabel.textContent = label;
+}
+
+// ─── File loading ──────────────────────────────────────────────────────────
+async function loadFile(file) {
+    if (!file || !file.type.startsWith('image/')) { showError('Please open a valid image file.'); return; }
+    sourceFile = file;
+    outputBlob = null;
+    lastEncodeMs = null;
+    lastUsedQuality = null;
+    lastSSIM = null;
+    lastPSNR = null;
+
+    // Show original in left panel
+    const url = URL.createObjectURL(file);
+    origImg.onload = () => {
+        URL.revokeObjectURL(url);
+        updateDimLabel();
+    };
+    origImg.src = url;
+    origImg.style.display = 'block';
+    document.getElementById('origDropOverlay').style.display = 'none';
+    document.getElementById('outDropOverlay').style.display = 'none';
+
+    // Decode to ImageData for encoding
+    progressWrap.style.display = 'block';
+    setProgress(10, 'Decoding…');
+    try {
+        sourceImgData = await decodeToImageData(file);
+        setProgress(100, 'Ready');
+        setTimeout(() => { progressWrap.style.display = 'none'; setProgress(0,''); }, 600);
+    } catch(e) {
+        showError('Could not decode image: ' + e.message);
+        progressWrap.style.display = 'none';
+        return;
+    }
+
+    infoBar.textContent = `${file.name} · ${fmtBytes(file.size)}`;
+    document.getElementById('origBox').classList.remove('empty');
+    document.getElementById('outImgBox').classList.remove('empty');
+    outImg.style.display = 'none';
+    statsWrap.style.display = 'none';
+    downloadBtn.disabled = true;
+        copyOutputBtn.disabled = true; copyOutputBtn.style.opacity = "0.4";
+    convertBtn.disabled = false;
+
+    // Auto-convert if enabled
+    if (autoConvert) convertBtn.click();
+}
+
+// Decode any image the browser can display into a raw ImageData.
+// Using canvas means we support JPEG, PNG, WebP, AVIF, GIF, BMP, TIFF…
+// without any extra WASM, and we avoid the jsquash decode module complexity.
+async function decodeToImageData(file) {
+    return decodeViaCanvas(file);
+}
+
+function decodeViaCanvas(file) {
+    return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+            const c = document.createElement('canvas');
+            c.width = img.naturalWidth; c.height = img.naturalHeight;
+            const ctx = c.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            URL.revokeObjectURL(url);
+            resolve(ctx.getImageData(0, 0, c.width, c.height));
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Canvas decode failed')); };
+        img.src = url;
+    });
+}
+
+// ─── Conversion ────────────────────────────────────────────────────────────
+convertBtn.addEventListener('click', async () => {
+    if (!sourceImgData) return;
+    convertBtn.disabled = true;
+    downloadBtn.disabled = true;
+        copyOutputBtn.disabled = true; copyOutputBtn.style.opacity = "0.4";
+    statsWrap.style.display = 'none';
+    outputBlob = null;
+    lastEncodeMs = null;
+    progressWrap.style.display = 'block';
+    setProgress(5, 'Encoding…');
+
+    const t0 = performance.now();
+    try {
+        const m = FMT_META[outputFmt];
+        let usedQuality = qualityVal;
+
+        if (maxSizeEnabled && maxSizeBytes > 0 && m.hasQuality) {
+            maxSizeStatus.style.display = 'none';
+            const result = await encodeToFitSize(sourceImgData, outputFmt, speedVal, maxSizeBytes);
+            const elapsed = Math.round(performance.now() - t0);
+            setProgress(100, 'Done');
+            if (!result) {
+                // Even q=0 didn't fit — encode at q=0 and warn
+                const buf0 = await encode(sourceImgData, outputFmt, 0, speedVal);
+                outputBlob = new Blob([buf0], { type: m.mime });
+                usedQuality = 0;
+                maxSizeStatus.style.display = 'block';
+                maxSizeStatus.innerHTML = `<span style="color:#f87171;"><i class="bi bi-exclamation-triangle me-1"></i>Can't reach target — minimum quality used (${fmtBytes(outputBlob.size)})</span>`;
+            } else {
+                outputBlob = result.blob;
+                usedQuality = result.quality;
+                maxSizeStatus.style.display = 'block';
+                maxSizeStatus.innerHTML = `<span style="color:#22c55e;"><i class="bi bi-check2 me-1"></i>Fit at q${usedQuality} → ${fmtBytes(outputBlob.size)}</span>`;
+            }
+            lastEncodeMs = elapsed;
+        } else {
+            const buf = await encode(sourceImgData, outputFmt, qualityVal, speedVal);
+            const elapsed = Math.round(performance.now() - t0);
+            setProgress(100, 'Done');
+            outputBlob = new Blob([buf], { type: m.mime });
+            lastEncodeMs = elapsed;
+            usedQuality = qualityVal;
+        }
+        lastUsedQuality = usedQuality;
+
+        // Show output image
+        const url = URL.createObjectURL(outputBlob);
+        outImg.onload = () => URL.revokeObjectURL(url);
+        outImg.src = url;
+        outImg.style.display = 'block';
+        document.getElementById('outDropOverlay').style.display = 'none';
+
+        updateDimLabel();
+
+        // Stats
+        const origSize = sourceFile.size;
+        const outSize  = outputBlob.size;
+        const savings  = ((origSize - outSize) / origSize * 100);
+        statOrigSize.textContent = fmtBytes(origSize);
+        statOutSize.textContent  = fmtBytes(outSize);
+        statSavings.innerHTML    = `<span class="${savings >= 0 ? 'savings-positive' : 'savings-negative'}">${savings >= 0 ? '−' : '+'}${Math.abs(savings).toFixed(1)}%</span>`;
+        statTime.textContent     = lastEncodeMs + 'ms';
+        statsWrap.style.display  = 'block';
+
+        // SSIM / PSNR (async, decode output blob then compare)
+        if (metricsEnabled) {
+        statSSIM.textContent = '…';
+        statPSNR.textContent = '…';
+        decodeToImageData(outputBlob).then(outImgData => {
+            const { ssim, psnr } = computeSSIMandPSNR(sourceImgData, outImgData);
+            lastSSIM = ssim; lastPSNR = psnr;
+            const ssimColor = ssim > 0.98 ? '#22c55e' : ssim > 0.95 ? '#86efac' : ssim > 0.90 ? '#fbbf24' : '#f87171';
+            statSSIM.innerHTML = `<span style="color:${ssimColor}">${ssim.toFixed(4)}</span>`;
+            const psnrColor = psnr > 45 ? '#22c55e' : psnr > 38 ? '#86efac' : psnr > 30 ? '#fbbf24' : '#f87171';
+            statPSNR.innerHTML = psnr === Infinity
+                ? `<span style="color:#22c55e">∞</span>`
+                : `<span style="color:${psnrColor}">${psnr.toFixed(1)}</span>`;
+            updateDimLabel();
+        }).catch(() => { statSSIM.textContent = '—'; statPSNR.textContent = '—'; });
+        } else {
+            statSSIM.textContent = '—';
+            statPSNR.textContent = '—';
+        }
+
+        downloadBtn.disabled = false;
+        copyOutputBtn.disabled = false;
+        copyOutputBtn.style.opacity = '1';
+        setTimeout(() => { progressWrap.style.display = 'none'; setProgress(0,''); }, 600);
+    } catch(e) {
+        showError('Conversion failed: ' + e.message);
+        console.error(e);
+        progressWrap.style.display = 'none';
+        setProgress(0,'');
+    }
+    convertBtn.disabled = false;
+});
+
+// ─── Image quality metrics ─────────────────────────────────────────────────
+function computeSSIMandPSNR(a, b) {
+    // Use luma (Y from YCbCr) for both metrics, matching how most tools do it
+    const n = Math.min(a.data.length, b.data.length) / 4;
+    const aY = new Float32Array(n);
+    const bY = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+        const j = i * 4;
+        aY[i] = 0.299 * a.data[j] + 0.587 * a.data[j+1] + 0.114 * a.data[j+2];
+        bY[i] = 0.299 * b.data[j] + 0.587 * b.data[j+1] + 0.114 * b.data[j+2];
+    }
+
+    // PSNR
+    let mse = 0;
+    for (let i = 0; i < n; i++) { const d = aY[i] - bY[i]; mse += d * d; }
+    mse /= n;
+    const psnr = mse === 0 ? Infinity : 10 * Math.log10((255 * 255) / mse);
+
+    // SSIM (single window over full image, fast approximation)
+    const C1 = (0.01 * 255) ** 2, C2 = (0.03 * 255) ** 2;
+    let muA = 0, muB = 0;
+    for (let i = 0; i < n; i++) { muA += aY[i]; muB += bY[i]; }
+    muA /= n; muB /= n;
+    let sigA2 = 0, sigB2 = 0, sigAB = 0;
+    for (let i = 0; i < n; i++) {
+        const da = aY[i] - muA, db = bY[i] - muB;
+        sigA2 += da * da; sigB2 += db * db; sigAB += da * db;
+    }
+    sigA2 /= n; sigB2 /= n; sigAB /= n;
+    const ssim = ((2*muA*muB + C1) * (2*sigAB + C2))
+               / ((muA*muA + muB*muB + C1) * (sigA2 + sigB2 + C2));
+
+    return { ssim, psnr };
+}
+
+async function encode(imgData, fmt, qualityPct, speed) {
+    switch (fmt) {
+        case 'avif': {
+            // speed 1-5 → effort 10,8,6,4,1  (10 = fastest)
+            const efforts = [10, 8, 6, 4, 1];
+            const effort = efforts[speed - 1];
+            const cqLevel = resolveQuality(qualityPct, 'avif');
+            setProgress(20, 'Encoding AVIF…');
+            const buf = await avifEncode(imgData, { cqLevel, speed: effort });
+            setProgress(95, 'Finalizing…');
+            return buf;
+        }
+        case 'webp': {
+            // speed 1-5 → method 0,1,2,3,5  (avoid worst method 6)
+            const methods = [0, 1, 2, 3, 5];
+            const method = methods[speed - 1];
+            const quality = resolveQuality(qualityPct, 'webp');
+            setProgress(20, 'Encoding WEBP…');
+            const buf = await webpEncode(imgData, { quality, method });
+            setProgress(95, 'Finalizing…');
+            return buf;
+        }
+        case 'jpeg': {
+            const quality = resolveQuality(qualityPct, 'jpeg');
+            setProgress(30, 'Encoding JPEG…');
+            const buf = await jpegEncode(imgData, { quality });
+            setProgress(95, 'Finalizing…');
+            return buf;
+        }
+        case 'mozjpeg': {
+            const quality = resolveQuality(qualityPct, 'mozjpeg');
+            setProgress(30, 'Encoding MOZJPEG…');
+            const buf = await jpegEncode(imgData, {
+                quality,
+                progressive: true,
+                optimize_coding: true,
+                smoothing: 0,
+                color_space: 3,
+                quant_table: 3,
+                trellis_multipass: true,
+                trellis_opt_zero: true,
+                trellis_opt_table: true,
+                trellis_loops: 1,
+                auto_subsample: true,
+                chroma_subsample: 2,
+                separate_chroma_quality: false,
+                chroma_quality: quality,
+            });
+            setProgress(95, 'Finalizing…');
+            return buf;
+        }
+        case 'png': {
+            setProgress(20, 'Encoding PNG…');
+            const raw = await pngEncode(imgData);
+            setProgress(60, 'Optimizing with OxiPNG…');
+            // level: map speed 1-5 → oxipng level 1,2,3,5,8
+            const levels = [1, 2, 3, 5, 8];
+            const optimized = await optimise(raw, { level: levels[speed - 1] });
+            setProgress(95, 'Finalizing…');
+            return optimized;
+        }
+        default: throw new Error('Unknown format: ' + fmt);
+    }
+}
+
+// ─── Max file size target ──────────────────────────────────────────────────
+let maxSizeEnabled = false;
+let maxSizeBytes   = 0; // 0 = not set
+
+const maxSizeToggleWrap = document.getElementById('maxSizeToggleWrap');
+const maxSizeTrack      = document.getElementById('maxSizeTrack');
+const maxSizeBody       = document.getElementById('maxSizeBody');
+const maxSizeInput      = document.getElementById('maxSizeInput');
+const maxSizeStatus     = document.getElementById('maxSizeStatus');
+
+function setMaxSizeEnabled(val) {
+    maxSizeEnabled = val;
+    maxSizeTrack.classList.toggle('on', val);
+    maxSizeToggleWrap.setAttribute('aria-checked', val);
+    maxSizeBody.style.display = val ? '' : 'none';
+    if (!val) maxSizeStatus.style.display = 'none';
+}
+maxSizeToggleWrap.addEventListener('click', () => setMaxSizeEnabled(!maxSizeEnabled));
+maxSizeToggleWrap.addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setMaxSizeEnabled(!maxSizeEnabled); } });
+
+// Preset pills
+document.querySelectorAll('#maxSizePresets .speed-pill').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('#maxSizePresets .speed-pill').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        maxSizeBytes = parseInt(btn.dataset.bytes);
+        maxSizeInput.value = Math.round(maxSizeBytes / 1024);
+    });
+});
+
+maxSizeInput.addEventListener('input', () => {
+    const kb = parseInt(maxSizeInput.value);
+    if (!isNaN(kb) && kb > 0) {
+        maxSizeBytes = kb * 1024;
+        document.querySelectorAll('#maxSizePresets .speed-pill').forEach(b => {
+            b.classList.toggle('active', parseInt(b.dataset.bytes) === maxSizeBytes);
+        });
+    }
+});
+
+/** Binary-search the highest quality level that fits within maxSizeBytes.
+ *  Returns { blob, quality } or null if even q=0 doesn't fit. */
+async function encodeToFitSize(imgData, fmt, speed, targetBytes) {
+    const qualities = [0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100];
+    // Only test qualities ≤ current qualityVal (don't exceed user's chosen quality)
+    const candidates = qualities.filter(q => q <= qualityVal);
+
+    let lo = 0, hi = candidates.length - 1;
+    let bestBlob = null, bestQ = null;
+
+    // First check if the current quality already fits
+    const topBuf = await encode(imgData, fmt, candidates[hi], speed);
+    const topBlob = new Blob([topBuf], { type: FMT_META[fmt].mime });
+    if (topBlob.size <= targetBytes) return { blob: topBlob, quality: candidates[hi] };
+
+    // Binary search
+    while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const q = candidates[mid];
+        setProgress(20 + Math.round(60 * (1 - (hi - lo) / candidates.length)), `Trying q${q}…`);
+        qualityRange.value = q;
+        updateQualityDisp(q);
+        const buf = await encode(imgData, fmt, q, speed);
+        const blob = new Blob([buf], { type: FMT_META[fmt].mime });
+        if (blob.size <= targetBytes) {
+            bestBlob = blob; bestQ = q;
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    const finalQ = bestQ ?? candidates[0];
+    qualityRange.value = finalQ;
+    updateQualityDisp(finalQ);
+    return bestBlob ? { blob: bestBlob, quality: bestQ } : null;
+}
+
+// ─── Copy output to clipboard ──────────────────────────────────────────────
+copyOutputBtn.addEventListener('click', async () => {
+    if (!outputBlob) return;
+    try {
+        // Clipboard API requires image/png; convert blob via canvas if needed
+        let pngBlob = outputBlob;
+        if (outputBlob.type !== 'image/png') {
+            const bmp = await createImageBitmap(outputBlob);
+            const c = document.createElement('canvas');
+            c.width = bmp.width; c.height = bmp.height;
+            c.getContext('2d').drawImage(bmp, 0, 0);
+            pngBlob = await new Promise(res => c.toBlob(res, 'image/png'));
+        }
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
+        const icon = copyOutputBtn.querySelector('i');
+        icon.className = 'bi bi-clipboard-check';
+        copyOutputBtn.style.color = '#22c55e';
+        setTimeout(() => { icon.className = 'bi bi-clipboard'; copyOutputBtn.style.color = 'rgb(6,116,142)'; }, 1800);
+    } catch(e) {
+        showError('Copy failed: ' + (e.message || 'clipboard not available'));
+    }
+});
+
+// ─── Download ──────────────────────────────────────────────────────────────
+downloadBtn.addEventListener('click', () => {
+    if (!outputBlob) return;
+    const m = FMT_META[outputFmt];
+    const base = sourceFile ? sourceFile.name.replace(/\.[^.]+$/, '') : 'converted';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(outputBlob);
+    a.download = `${base}-q${lastUsedQuality ?? qualityVal}.${m.ext}`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+
+// ─── File input events ─────────────────────────────────────────────────────
+imageLoader.addEventListener('change', e => {
+    if (e.target.files[0]) loadFile(e.target.files[0]);
+    imageLoader.value = '';
+});
+dropZone.addEventListener('click', e => { if (e.target !== imageLoader) imageLoader.click(); });
+['dragenter','dragover'].forEach(ev => dropZone.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation(); dropZone.classList.add('drag-over');
+}));
+['dragleave','drop'].forEach(ev => dropZone.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation(); dropZone.classList.remove('drag-over');
+}));
+dropZone.addEventListener('drop', e => {
+    const f = Array.from(e.dataTransfer.files).find(f => f.type.startsWith('image/'));
+    if (f) loadFile(f);
+});
+
+// Canvas-area drop
+// origBox drag-and-drop
+const origBoxEl = document.getElementById('origBox');
+const origDropOverlay = document.getElementById('origDropOverlay');
+['dragenter','dragover'].forEach(ev => origBoxEl.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    origDropOverlay.style.background = 'rgba(56,189,248,0.08)';
+    origDropOverlay.style.outline = '2px dashed #38bdf8';
+    origDropOverlay.style.outlineOffset = '-4px';
+    origDropOverlay.style.borderRadius = '6px';
+}));
+['dragleave','drop'].forEach(ev => origBoxEl.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    origDropOverlay.style.background = '';
+    origDropOverlay.style.outline = '';
+}));
+origBoxEl.addEventListener('drop', e => {
+    const f = Array.from(e.dataTransfer.files).find(f => f.type.startsWith('image/'));
+    if (f) loadFile(f);
+});
+// Click origBox (when no image) to open file picker
+origBoxEl.addEventListener('click', e => {
+    if (sourceFile) return; // only when empty
+    imageLoader.click();
+});
+
+// outImgBox drag-and-drop
+const outBoxEl = document.getElementById('outImgBox');
+const outDropOverlay = document.getElementById('outDropOverlay');
+['dragenter','dragover'].forEach(ev => outBoxEl.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    outDropOverlay.style.background = 'rgba(56,189,248,0.08)';
+    outDropOverlay.style.outline = '2px dashed #38bdf8';
+    outDropOverlay.style.outlineOffset = '-4px';
+    outDropOverlay.style.borderRadius = '6px';
+}));
+['dragleave','drop'].forEach(ev => outBoxEl.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    outDropOverlay.style.background = '';
+    outDropOverlay.style.outline = '';
+}));
+outBoxEl.addEventListener('drop', e => {
+    const f = Array.from(e.dataTransfer.files).find(f => f.type.startsWith('image/'));
+    if (f) loadFile(f);
+});
+outBoxEl.addEventListener('click', e => {
+    if (sourceFile) return; // only when no source loaded yet
+    imageLoader.click();
+});
+
+// Paste
+document.addEventListener('paste', e => {
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    for (const item of items) {
+        if (item.type && item.type.startsWith('image/')) {
+            e.preventDefault();
+            const f = item.getAsFile();
+            if (f) loadFile(f);
+            return;
+        }
+    }
+});
+
+
+// ═══════════════════════════════════════════════════════════════
+// SYNCHRONIZED ZOOM + PAN
+// ═══════════════════════════════════════════════════════════════
+const origBox      = document.getElementById('origBox');
+const outBox       = document.getElementById('outImgBox');
+const origViewport = document.getElementById('origViewport');
+const outViewport  = document.getElementById('outViewport');
+const zoomInBtn    = document.getElementById('zoomIn');
+const zoomOutBtn   = document.getElementById('zoomOut');
+const zoomResetBtn = document.getElementById('zoomReset');
+const zoomLabel    = document.getElementById('zoomLabel');
+
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 16;   // x1600
+const ZOOM_STEP = 1.25;
+
+let zoom = 1;
+let panX = 0;
+let panY = 0;
+
+function clampZoom(z) {
+    return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+}
+
+function applyTransform() {
+    const t = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+    origViewport.style.transform = t;
+    outViewport.style.transform  = t;
+    const pct = Math.round(zoom * 100);
+    zoomLabel.textContent = pct >= 1000 ? (zoom).toFixed(0) + 'x' : pct + '%';
+}
+
+function zoomAround(newZoom, cx, cy, box) {
+    // cx/cy are offsets from the box centre
+    const ratio = newZoom / zoom;
+    panX = cx + (panX - cx) * ratio;
+    panY = cy + (panY - cy) * ratio;
+    zoom = newZoom;
+    applyTransform();
+}
+
+function fitZoom() {
+    // Fit the source image inside the origBox, centred, no pan
+    const img = document.getElementById('origImg');
+    if (!img || !img.naturalWidth) { zoom = 1; panX = 0; panY = 0; applyTransform(); return; }
+    const box  = origBox.getBoundingClientRect();
+    const scaleX = box.width  / img.naturalWidth;
+    const scaleY = box.height / img.naturalHeight;
+    zoom = Math.min(scaleX, scaleY); // fill box, allow upscale
+    panX = 0; panY = 0;
+    applyTransform();
+}
+function resetZoom() { fitZoom(); }
+
+// Buttons
+zoomInBtn.addEventListener('click',    () => zoomAround(clampZoom(zoom * ZOOM_STEP), 0, 0, null));
+zoomOutBtn.addEventListener('click',   () => zoomAround(clampZoom(zoom / ZOOM_STEP), 0, 0, null));
+zoomResetBtn.addEventListener('click', () => resetZoom());
+
+// Keyboard shortcuts
+// ─── Keyboard shortcuts modal ──────────────────────────────────────────────
+const shortcutsModal   = document.getElementById('shortcutsModal');
+const shortcutsClose   = document.getElementById('shortcutsClose');
+const shortcutsBackdrop= document.getElementById('shortcutsBackdrop');
+const shortcutsBtn     = document.getElementById('shortcutsBtn');
+
+function openShortcuts()  { shortcutsModal.style.display = 'flex'; }
+function closeShortcuts() { shortcutsModal.style.display = 'none'; }
+shortcutsBtn.addEventListener('click', openShortcuts);
+shortcutsClose.addEventListener('click', closeShortcuts);
+shortcutsBackdrop.addEventListener('click', closeShortcuts);
+
+// ─── Global keyboard shortcuts ─────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+    const tag = (e.target.tagName || '').toLowerCase();
+    const inInput = tag === 'input' || tag === 'textarea';
+
+    // Always: close modal
+    if (e.key === 'Escape') { closeShortcuts(); return; }
+
+    // Always: zoom (existing)
+    if (!inInput) {
+        if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomAround(clampZoom(zoom * ZOOM_STEP), 0, 0, null); return; }
+        if (e.key === '-')                  { e.preventDefault(); zoomAround(clampZoom(zoom / ZOOM_STEP), 0, 0, null); return; }
+        if (e.key === '0')                  { e.preventDefault(); fitZoom(); return; }
+    }
+
+    // Skip remaining shortcuts when typing in an input
+    if (inInput) return;
+    // Skip when modal is open (except Esc above)
+    if (shortcutsModal.style.display === 'flex') return;
+    // Skip when modifier keys held (except Ctrl+V which browser handles natively)
+    if (e.metaKey || e.altKey) return;
+    if (e.ctrlKey && e.key !== 'v') return;
+
+    switch (e.key) {
+        case '?': e.preventDefault(); openShortcuts(); break;
+
+        // File
+        case 'o': case 'O': e.preventDefault(); imageLoader.click(); break;
+
+        // Convert & export
+        case 'Enter':
+            e.preventDefault();
+            if (!convertBtn.disabled) convertBtn.click();
+            break;
+        case 'd': case 'D':
+            e.preventDefault();
+            if (!downloadBtn.disabled) downloadBtn.click();
+            break;
+        case 'c': case 'C':
+            if (!e.ctrlKey) { e.preventDefault(); if (!copyOutputBtn.disabled) copyOutputBtn.click(); }
+            break;
+        case 'a': case 'A':
+            e.preventDefault();
+            setAutoConvert(!autoConvert);
+            break;
+
+        // Quality
+        case 'ArrowUp': {
+            e.preventDefault();
+            const nq = Math.min(100, qualityVal + 5);
+            qualityRange.value = nq; qualityVal = nq;
+            updateQualityDisp(nq); saveConfig();
+            if (autoConvert && sourceImgData) scheduleAutoConvert();
+            break;
+        }
+        case 'ArrowDown': {
+            e.preventDefault();
+            const nq = Math.max(0, qualityVal - 5);
+            qualityRange.value = nq; qualityVal = nq;
+            updateQualityDisp(nq); saveConfig();
+            if (autoConvert && sourceImgData) scheduleAutoConvert();
+            break;
+        }
+
+        // Format
+        case '1': case '2': case '3': case '4': case '5': {
+            const fmts = ['avif','webp','jpeg','mozjpeg','png'];
+            const fmt = fmts[parseInt(e.key) - 1];
+            if (fmt) {
+                document.querySelectorAll('.fmt-pill').forEach(b => b.classList.toggle('active', b.dataset.fmt === fmt));
+                outputFmt = fmt; saveConfig(); updateFmtUI();
+                if (autoConvert && sourceImgData) scheduleAutoConvert();
+            }
+            break;
+        }
+
+        // Metrics
+        case 'm': case 'M':
+            e.preventDefault();
+            setMetrics(!metricsEnabled);
+            break;
+    }
+});
+
+// Wheel zoom on either box — pivot at cursor position
+function onWheel(e) {
+    e.preventDefault();
+    const box   = e.currentTarget;
+    const rect  = box.getBoundingClientRect();
+    // cursor offset from box centre
+    const cx = e.clientX - rect.left - rect.width  / 2;
+    const cy = e.clientY - rect.top  - rect.height / 2;
+    const factor = 1 + Math.min(Math.abs(e.deltaY), 100) * 0.0008;
+    const delta = e.deltaY < 0 ? factor : 1 / factor;
+    zoomAround(clampZoom(zoom * delta), cx, cy, box);
+}
+origBox.addEventListener('wheel', onWheel, { passive: false });
+outBox.addEventListener( 'wheel', onWheel, { passive: false });
+
+// Pan — synchronized: dragging either box pans both
+let isPanning = false;
+let panStart  = null;
+let panStartX = 0;
+let panStartY = 0;
+
+function onPanStart(e) {
+    // Ignore if it's a file drop on the out box
+    isPanning = true;
+    panStart  = { x: e.clientX, y: e.clientY };
+    panStartX = panX;
+    panStartY = panY;
+    e.preventDefault();
+}
+function onPanMove(e) {
+    if (!isPanning || !panStart) return;
+    const dx = e.clientX - panStart.x;
+    const dy = e.clientY - panStart.y;
+    panX = panStartX + dx;
+    panY = panStartY + dy;
+    applyTransform();
+}
+function onPanEnd() {
+    isPanning = false;
+    panStart  = null;
+}
+
+[origBox, outBox].forEach(box => {
+    box.addEventListener('mousedown',  onPanStart);
+    box.addEventListener('touchstart', e => onPanStart(e.touches[0]), { passive: false });
+});
+window.addEventListener('mousemove', onPanMove);
+window.addEventListener('touchmove', e => { if (isPanning) { e.preventDefault(); onPanMove(e.touches[0]); } }, { passive: false });
+window.addEventListener('mouseup',   onPanEnd);
+window.addEventListener('touchend',  onPanEnd);
+
+// Reset pan/zoom when a new image is loaded
+const _origLoadFile = loadFile;
+// patch: call resetZoom after loadFile sets sourceImgData
+// (we hook into the existing loadFile by appending a MutationObserver on origImg)
+// When a new image src is set, wait for it to load then fit it
+document.getElementById('origImg').addEventListener('load', () => {
+    // rAF ensures the box has its final size after layout
+    requestAnimationFrame(() => requestAnimationFrame(() => { fitZoom(); positionNavLabels(); }));
+});
+
+
+// ─── Position navbar labels above image panels ────────────────────────────
+function positionNavLabels() {
+    const origBox  = document.getElementById('origBox');
+    const outBox   = document.getElementById('outImgBox');
+    const nav      = document.querySelector('nav.navbar');
+    const lOrig    = document.getElementById('navOrigLabel');
+    const lOut     = document.getElementById('outLabel');
+    if (!origBox || !outBox || !nav || !lOrig || !lOut) return;
+
+    const navRect  = nav.getBoundingClientRect();
+    const origRect = origBox.getBoundingClientRect();
+    const outRect  = outBox.getBoundingClientRect();
+
+    const origCenterX = origRect.left + origRect.width / 2 - navRect.left;
+    const outCenterX  = outRect.left  + outRect.width  / 2 - navRect.left;
+
+    lOrig.style.left = origCenterX + 'px';
+    lOut.style.left  = outCenterX  + 'px';
+}
+
+window.addEventListener('resize', positionNavLabels);
+// Run after layout is complete
+requestAnimationFrame(() => requestAnimationFrame(positionNavLabels));
+applyTransform(); // init
+document.getElementById('origBox').classList.add('empty');
+document.getElementById('outImgBox').classList.add('empty');
+// Global drag prevent
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop',     e => e.preventDefault());
+
+// ─── Clear saved config ────────────────────────────────────────────────────
+document.getElementById('clearConfigBtn').addEventListener('click', () => {
+    clearConfig();
+    // Reset to defaults
+    outputFmt   = 'webp';
+    qualityVal  = 85;
+    speedVal    = 1;
+    setAutoConvert(true);
+    // Update format pills
+    document.querySelectorAll('.fmt-pill').forEach(b => b.classList.toggle('active', b.dataset.fmt === 'webp'));
+    // Update quality
+    qualityVal  = 80;
+    qualityRange.value = 80;
+    updateQualityDisp(80);
+    // Update speed pills
+    document.querySelectorAll('.speed-pill').forEach(b => b.classList.toggle('active', parseInt(b.dataset.speed) === 1));
+    updateFmtUI();
+    // Visual feedback: flash the button
+    const btn = document.getElementById('clearConfigBtn');
+    btn.style.color = '#86efac';
+    btn.querySelector('i').className = 'bi bi-check2';
+    setTimeout(() => {
+        btn.style.color = '#ef4444';
+        btn.querySelector('i').className = 'bi bi-trash3';
+    }, 1200);
+});
+</script>
+</body>
+</html>
