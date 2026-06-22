@@ -282,6 +282,7 @@
         /* Spinner */
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes maxSizeSpin { to { transform: rotate(360deg); } }
 
         /* Error toast */
         /* Auto-convert toggle */
@@ -560,17 +561,29 @@
                         <div class="toggle-track" id="maxSizeTrack"><div class="toggle-thumb"></div></div>
                     </div>
                 </div>
-                <div class="card-body p-2" id="maxSizeBody" style="display:none;">
+                <div class="card-body p-2" id="maxSizeBody" style="display:none;position:relative;">
+                    <!-- Searching overlay — shown while binary search is running -->
+                    <div id="maxSizeSpinner" style="display:none;position:absolute;inset:0;background:rgba(22,27,34,0.82);border-radius:6px;z-index:10;align-items:center;justify-content:center;gap:8px;">
+                        <svg width="20" height="20" viewBox="0 0 20 20">
+                            <circle cx="10" cy="10" r="8" fill="none" stroke="#2d3748" stroke-width="2.5"></circle>
+                            <circle cx="10" cy="10" r="8" fill="none" stroke="#38bdf8" stroke-width="2.5"
+                                stroke-dasharray="50" stroke-dashoffset="12"
+                                stroke-linecap="round"
+                                style="transform-origin:10px 10px;animation:maxSizeSpin 0.85s linear infinite;">
+                            </circle>
+                        </svg>
+                        <span style="font-size:0.75rem;font-weight:700;color:#38bdf8;letter-spacing:0.04em;">Searching…</span>
+                    </div>
                     <div class="d-flex gap-1 flex-wrap" id="maxSizePresets">
-                        <button class="speed-pill" data-bytes="102400">100 KB</button>
-                        <button class="speed-pill" data-bytes="262144">256 KB</button>
-                        <button class="speed-pill" data-bytes="524288">512 KB</button>
-                        <button class="speed-pill" data-bytes="1048576">1 MB</button>
-                        <button class="speed-pill" data-bytes="2097152">2 MB</button>
+                        <button class="speed-pill" data-bytes="65536">64 KiB</button>
+                        <button class="speed-pill" data-bytes="131072">128 KiB</button>
+                        <button class="speed-pill" data-bytes="262144">256 KiB</button>
+                        <button class="speed-pill" data-bytes="524288">512 KiB</button>
+                        <button class="speed-pill" data-bytes="1048576">1 MiB</button>
                     </div>
                     <div class="d-flex align-items-center gap-2 mt-2">
-                        <input type="number" id="maxSizeInput" min="1" placeholder="KB" style="width:80px;background:#1e2535;border:1px solid var(--panel-border);border-radius:5px;color:#f1f5f9;font-size:0.8rem;padding:3px 7px;">
-                        <span style="font-size:0.75rem;color:#94a3b8;">KB custom</span>
+                        <input type="number" id="maxSizeInput" min="1" placeholder="KiB" style="width:80px;background:#1e2535;border:1px solid var(--panel-border);border-radius:5px;color:#f1f5f9;font-size:0.8rem;padding:3px 7px;">
+                        <span style="font-size:0.75rem;color:#94a3b8;">KiB custom</span>
                     </div>
                     <div id="maxSizeStatus" style="font-size:0.73rem;margin-top:5px;display:none;"></div>
                 </div>
@@ -1044,9 +1057,10 @@ function setMetrics(val) {
 metricsToggleWrap.addEventListener('click', () => setMetrics(!metricsEnabled));
 metricsToggleWrap.addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setMetrics(!metricsEnabled); } });
 
-document.querySelectorAll('.speed-pill').forEach(btn => {
+document.querySelectorAll('.speed-pill:not([data-bytes]):not(.scale-preset-pill):not([data-fit])').forEach(btn => {
     btn.addEventListener('click', () => {
-        setActivePill('.speed-pill', btn);
+        if (!btn.dataset.speed) return; // guard: only handle effort/speed pills
+        setActivePill('#speedRow .speed-pill', btn);
         speedVal = parseInt(btn.dataset.speed);
         saveConfig();
         maybeConvertNow();
@@ -1212,9 +1226,9 @@ function scheduleAutoConvert() {
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 function fmtBytes(b) {
-    if (b < 1024) return b + ' B';
-    if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
-    return (b/1048576).toFixed(2) + ' MB';
+    if (b < 1000) return b + ' B';
+    if (b < 1000000) return (b/1000).toFixed(1) + ' KB';
+    return (b/1000000).toFixed(2) + ' MB';
 }
 
 function showError(msg) {
@@ -1387,6 +1401,9 @@ convertBtn.addEventListener('click', async () => {
 
         if (maxSizeEnabled && maxSizeBytes > 0 && m.hasQuality) {
             maxSizeStatus.style.display = 'none';
+            setMaxSizeBusy(true);
+            // Yield to the browser so it can paint the spinner before the heavy encode blocks the thread
+            await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
             // AVIF is very slow at high effort levels; force speed=1 (fastest) during
             // the binary search to keep it responsive. Other formats use the user's setting.
             const searchSpeed = outputFmt === 'avif' ? 1 : speedVal;
@@ -1405,7 +1422,12 @@ convertBtn.addEventListener('click', async () => {
                 usedQuality = result.quality;
                 maxSizeStatus.style.display = 'block';
                 maxSizeStatus.innerHTML = `<span style="color:#22c55e;"><i class="bi bi-check2 me-1"></i>Fit at q${usedQuality} → ${fmtBytes(outputBlob.size)}</span>`;
+                // Move the slider to the found quality visually, without updating qualityVal
+                // (so the change listener doesn't fire and trigger a new convert)
+                qualityRange.value = usedQuality;
+                updateQualityDisp(usedQuality);
             }
+            setMaxSizeBusy(false);
             lastEncodeMs = elapsed;
         } else {
             const buf = await encode(activeImgData, outputFmt, qualityVal, speedVal);
@@ -1465,6 +1487,7 @@ convertBtn.addEventListener('click', async () => {
         setOutputEnabled(true);
         setTimeout(() => { progressWrap.style.display = 'none'; setProgress(0,''); }, 600);
     } catch(e) {
+        setMaxSizeBusy(false);
         showError('Conversion failed: ' + e.message);
         console.error(e);
         progressWrap.style.display = 'none';
@@ -1594,16 +1617,28 @@ function setMaxSizeEnabled(val) {
     maxSizeToggleWrap.setAttribute('aria-checked', val);
     maxSizeBody.style.display = val ? '' : 'none';
     if (!val) maxSizeStatus.style.display = 'none';
+    // Lock/unlock the Quality slider when Max File Size is toggled
+    qualityRange.disabled = val;
+    qualityCard.style.opacity = val ? '0.45' : '';
+    qualityCard.style.pointerEvents = val ? 'none' : '';
+}
+
+const maxSizeSpinner = document.getElementById('maxSizeSpinner');
+
+/** Show/hide the searching overlay over the Max File Size card body. */
+function setMaxSizeBusy(busy) {
+    maxSizeSpinner.style.display = busy ? 'flex' : 'none';
 }
 maxSizeToggleWrap.addEventListener('click', () => setMaxSizeEnabled(!maxSizeEnabled));
 maxSizeToggleWrap.addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setMaxSizeEnabled(!maxSizeEnabled); } });
 
-// Preset pills
+// Preset pills — selecting one immediately triggers a convert
 document.querySelectorAll('#maxSizePresets .speed-pill').forEach(btn => {
     btn.addEventListener('click', () => {
         setActivePill('#maxSizePresets .speed-pill', btn);
         maxSizeBytes = parseInt(btn.dataset.bytes);
         maxSizeInput.value = Math.round(maxSizeBytes / 1024);
+        if (sourceImgData) convertBtn.click();
     });
 });
 
@@ -1615,6 +1650,9 @@ maxSizeInput.addEventListener('input', () => {
             b.classList.toggle('active', parseInt(b.dataset.bytes) === maxSizeBytes);
         });
     }
+});
+maxSizeInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); if (sourceImgData && maxSizeBytes > 0) convertBtn.click(); }
 });
 
 /** Binary-search the highest quality level that fits within maxSizeBytes.
@@ -1808,9 +1846,11 @@ function applyTransform() {
         (oImg.naturalWidth !== iImg.naturalWidth || oImg.naturalHeight !== iImg.naturalHeight)) {
         const sx = iImg.naturalWidth  / oImg.naturalWidth;
         const sy = iImg.naturalHeight / oImg.naturalHeight;
-        // Divide pan by the scale factors so the output image moves the same
-        // number of screen pixels as the original despite the different CSS scale.
-        const tOut = `translate(${panX / sx}px, ${panY / sy}px) scale(${zoom * sx}, ${zoom * sy})`;
+        // Pan stays identical to the original viewport — both viewports occupy the
+        // same screen box, so the same translate value produces the same visual offset.
+        // Only the scale needs the sx/sy compensation so the output image renders at
+        // the same apparent size as the original despite having different pixel dimensions.
+        const tOut = `translate(${panX}px, ${panY}px) scale(${zoom * sx}, ${zoom * sy})`;
         outViewport.style.transform = tOut;
     } else {
         outViewport.style.transform = t;
