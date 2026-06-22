@@ -110,7 +110,10 @@
             color: #f1f5f9;
             cursor: pointer;
             transition: all 0.15s;
-            flex: 1;
+            min-width: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .fmt-pill:hover { border-color: var(--accent); color: var(--accent); background: rgba(56,189,248,0.08); }
         .fmt-pill.active {
@@ -438,7 +441,7 @@
                     </div>
                 </div>
                 <div class="card-body p-2">
-                    <div class="d-flex flex-wrap gap-1 mb-1" id="fmtRow">
+                    <div class="gap-1 mb-1" id="fmtRow" style="display:grid;grid-template-columns:repeat(5, minmax(0, 1fr));">
                         <button class="fmt-pill" data-fmt="avif">AVIF</button>
                         <button class="fmt-pill active" data-fmt="webp">WebP</button>
                         <button class="fmt-pill" data-fmt="jpeg">JPEG</button>
