@@ -471,6 +471,48 @@
                 </div>
             </div>
 
+            <!-- Resize / Scale -->
+            <div class="card panel-card border mb-2" id="resizeCard">
+                <div class="card-header panel-header py-2 px-3 d-flex justify-content-between align-items-center">
+                    <span class="section-label mb-0"><i class="bi bi-arrows-angle-contract me-1"></i>Resize / Scale</span>
+                    <div class="toggle-wrap" id="resizeToggleWrap" title="Enable image resizing" role="switch" aria-checked="false" tabindex="0" style="margin-bottom:0;">
+                        <div class="toggle-track" id="resizeTrack"><div class="toggle-thumb"></div></div>
+                    </div>
+                </div>
+                <div class="card-body p-2" id="resizeBody" style="display:none;">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span style="font-size:0.75rem;color:#cbd5e1;font-weight:600;">Scale</span>
+                        <span id="scaleValLabel" style="color:var(--accent);font-weight:700;font-size:0.8rem;">100%</span>
+                    </div>
+                    <input type="range" class="form-range" id="scaleRange" min="1" max="100" step="1" value="100">
+                    
+                    <!-- Presets -->
+                    <div class="d-flex gap-1 flex-wrap mt-2" id="scalePresets">
+                        <button class="speed-pill" data-scale="25">25%</button>
+                        <button class="speed-pill" data-scale="50">50%</button>
+                        <button class="speed-pill" data-scale="75">75%</button>
+                        <button class="speed-pill active" data-scale="100">100%</button>
+                    </div>
+
+                    <!-- Direct dimension input for convenience -->
+                    <div class="d-flex align-items-center gap-2 mt-2 pt-2 border-top" style="border-color:var(--panel-border) !important;">
+                        <div class="d-flex flex-column" style="flex:1;">
+                            <label for="resizeWidth" style="font-size:0.65rem;color:#94a3b8;font-weight:600;text-transform:uppercase;">Width</label>
+                            <input type="number" id="resizeWidth" min="1" placeholder="W" style="width:100%;background:#1e2535;border:1px solid var(--panel-border);border-radius:5px;color:#f1f5f9;font-size:0.8rem;padding:3px 7px;">
+                        </div>
+                        <span style="color:#64748b;margin-top:12px;font-size:0.8rem;">×</span>
+                        <div class="d-flex flex-column" style="flex:1;">
+                            <label for="resizeHeight" style="font-size:0.65rem;color:#94a3b8;font-weight:600;text-transform:uppercase;">Height</label>
+                            <input type="number" id="resizeHeight" min="1" placeholder="H" style="width:100%;background:#1e2535;border:1px solid var(--panel-border);border-radius:5px;color:#f1f5f9;font-size:0.8rem;padding:3px 7px;">
+                        </div>
+                    </div>
+                    
+                    <div id="targetDimensionsHelp" style="font-size:0.7rem;color:#94a3b8;margin-top:6px;text-align:center;">
+                        Target: <span id="targetDimensionsText" style="color:#cbd5e1;font-weight:600;">—</span>
+                    </div>
+                </div>
+            </div>
+
             <!-- Speed (effort) -->
             <div class="card panel-card border mb-2" id="speedCard">
                 <div class="card-header panel-header py-2 px-3">
@@ -699,7 +741,7 @@ function loadConfig() {
     try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch { return {}; }
 }
 function saveConfig() {
-    try { localStorage.setItem(LS_KEY, JSON.stringify({ outputFmt, qualityVal, speedVal, autoConvert })); } catch {}
+    try { localStorage.setItem(LS_KEY, JSON.stringify({ outputFmt, qualityVal, speedVal, autoConvert, resizeEnabled, scaleVal })); } catch {}
 }
 function clearConfig() {
     try { localStorage.removeItem(LS_KEY); } catch {}
@@ -715,10 +757,14 @@ let lastSSIM = null;
 let lastPSNR = null;
 
 const _cfg = loadConfig();
-let outputFmt   = _cfg.outputFmt  || 'webp';
-let qualityVal  = _cfg.qualityVal != null ? _cfg.qualityVal : 80;
-let speedVal    = _cfg.speedVal   || 1;
-let autoConvert = _cfg.autoConvert != null ? _cfg.autoConvert : true;
+let outputFmt     = _cfg.outputFmt  || 'webp';
+let qualityVal    = _cfg.qualityVal != null ? _cfg.qualityVal : 80;
+let speedVal      = _cfg.speedVal   || 1;
+let autoConvert   = _cfg.autoConvert != null ? _cfg.autoConvert : true;
+let resizeEnabled = _cfg.resizeEnabled != null ? _cfg.resizeEnabled : false;
+let scaleVal      = _cfg.scaleVal != null ? _cfg.scaleVal : 100;
+let origWidth     = 0;
+let origHeight    = 0;
 
 // ─── DOM refs ──────────────────────────────────────────────────────────────
 const dropZone     = document.getElementById('dropZone');
@@ -770,9 +816,16 @@ function updateDimLabel() {
                  : '')
              + `<span style="color:#64748b;margin:0 4px;">·</span>`
              + `<span style="color:#94a3b8;">${fname}</span>`
-             + `<span style="color:#64748b;margin:0 4px;">·</span>`
-             + `${w} × ${h}px`
-             + `<span style="color:#64748b;"> (${ratio})</span>`;
+             + `<span style="color:#64748b;margin:0 4px;">·</span>`;
+
+    if (resizeEnabled && scaleVal !== 100) {
+        const tw = Math.max(1, Math.round(w * scaleVal / 100));
+        const th = Math.max(1, Math.round(h * scaleVal / 100));
+        html += `${w} × ${h}px <span style="color:#64748b;">→</span> <span style="color:var(--accent);font-weight:700;">${tw} × ${th}px</span>`;
+    } else {
+        html += `${w} × ${h}px`;
+    }
+    html += `<span style="color:#64748b;"> (${ratio})</span>`;
 
     if (outputBlob) {
         const pct = Math.round(outputBlob.size / origSize * 100);
@@ -964,6 +1017,129 @@ document.querySelectorAll('.speed-pill').forEach(btn => {
     });
 });
 
+// ─── Resize UI handlers ────────────────────────────────────────────────────
+const resizeToggleWrap = document.getElementById('resizeToggleWrap');
+const resizeTrack      = document.getElementById('resizeTrack');
+const resizeBody       = document.getElementById('resizeBody');
+const scaleRange       = document.getElementById('scaleRange');
+const scaleValLabel    = document.getElementById('scaleValLabel');
+const resizeWidth      = document.getElementById('resizeWidth');
+const resizeHeight     = document.getElementById('resizeHeight');
+const targetDimText    = document.getElementById('targetDimensionsText');
+
+function setResizeEnabled(val) {
+    resizeEnabled = val;
+    resizeTrack.classList.toggle('on', val);
+    resizeToggleWrap.setAttribute('aria-checked', val);
+    resizeBody.style.display = val ? '' : 'none';
+    saveConfig();
+    updateDimLabel();
+    if (autoConvert && sourceImgData) scheduleAutoConvert();
+}
+setResizeEnabled(resizeEnabled);
+resizeToggleWrap.addEventListener('click', () => setResizeEnabled(!resizeEnabled));
+resizeToggleWrap.addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setResizeEnabled(!resizeEnabled); } });
+
+function updateResizeUI() {
+    if (!sourceImgData) {
+        resizeWidth.value = '';
+        resizeHeight.value = '';
+        targetDimText.textContent = '—';
+        return;
+    }
+    
+    // Set baseline original dimensions if not set
+    if (!origWidth || !origHeight) {
+        origWidth = sourceImgData.width;
+        origHeight = sourceImgData.height;
+    }
+    
+    const w = Math.max(1, Math.round(origWidth * scaleVal / 100));
+    const h = Math.max(1, Math.round(origHeight * scaleVal / 100));
+    
+    resizeWidth.value = w;
+    resizeHeight.value = h;
+    targetDimText.textContent = `${w} × ${h}px`;
+    scaleValLabel.textContent = `${scaleVal}%`;
+}
+
+// Restore range value and presets styling
+scaleRange.value = scaleVal;
+scaleValLabel.textContent = `${scaleVal}%`;
+document.querySelectorAll('#scalePresets .speed-pill').forEach(b => {
+    b.classList.toggle('active', parseInt(b.dataset.scale) === scaleVal);
+});
+
+scaleRange.addEventListener('input', () => {
+    scaleVal = parseInt(scaleRange.value);
+    document.querySelectorAll('#scalePresets .speed-pill').forEach(b => {
+        b.classList.toggle('active', parseInt(b.dataset.scale) === scaleVal);
+    });
+    updateResizeUI();
+    saveConfig();
+    updateDimLabel();
+    if (autoConvert && sourceImgData) scheduleAutoConvert();
+});
+
+// Presets
+document.querySelectorAll('#scalePresets .speed-pill').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('#scalePresets .speed-pill').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        scaleVal = parseInt(btn.dataset.scale);
+        scaleRange.value = scaleVal;
+        updateResizeUI();
+        saveConfig();
+        updateDimLabel();
+        if (autoConvert && sourceImgData) scheduleAutoConvert();
+    });
+});
+
+// Direct dimension inputs
+resizeWidth.addEventListener('input', () => {
+    if (!sourceImgData || !origWidth) return;
+    let w = parseInt(resizeWidth.value);
+    if (isNaN(w) || w <= 0) return;
+    
+    // Calculate new scale percentage
+    let newScale = Math.round((w / origWidth) * 100);
+    newScale = Math.max(1, Math.min(100, newScale)); // clamp scale to 1% - 100%
+    scaleVal = newScale;
+    scaleRange.value = scaleVal;
+    
+    // Update active preset button styling
+    document.querySelectorAll('#scalePresets .speed-pill').forEach(b => {
+        b.classList.toggle('active', parseInt(b.dataset.scale) === scaleVal);
+    });
+    
+    updateResizeUI();
+    saveConfig();
+    updateDimLabel();
+    if (autoConvert && sourceImgData) scheduleAutoConvert();
+});
+
+resizeHeight.addEventListener('input', () => {
+    if (!sourceImgData || !origHeight) return;
+    let h = parseInt(resizeHeight.value);
+    if (isNaN(h) || h <= 0) return;
+    
+    // Calculate new scale percentage
+    let newScale = Math.round((h / origHeight) * 100);
+    newScale = Math.max(1, Math.min(100, newScale)); // clamp scale to 1% - 100%
+    scaleVal = newScale;
+    scaleRange.value = scaleVal;
+    
+    // Update active preset button styling
+    document.querySelectorAll('#scalePresets .speed-pill').forEach(b => {
+        b.classList.toggle('active', parseInt(b.dataset.scale) === scaleVal);
+    });
+    
+    updateResizeUI();
+    saveConfig();
+    updateDimLabel();
+    if (autoConvert && sourceImgData) scheduleAutoConvert();
+});
+
 // ─── Debounced auto-convert with countdown ────────────────────────────────
 let _autoConvertTimer   = null;
 let _countdownInterval  = null;
@@ -1075,6 +1251,9 @@ async function loadFile(file) {
     setProgress(10, 'Decoding…');
     try {
         sourceImgData = await decodeToImageData(file);
+        origWidth = sourceImgData.width;
+        origHeight = sourceImgData.height;
+        updateResizeUI();
         setProgress(100, 'Ready');
         setTimeout(() => { progressWrap.style.display = 'none'; setProgress(0,''); }, 600);
     } catch(e) {
@@ -1120,6 +1299,30 @@ function decodeViaCanvas(file) {
     });
 }
 
+function getResizedImageData(imgData, scalePct) {
+    if (scalePct === 100) return imgData;
+    const scale = scalePct / 100;
+    const width = Math.max(1, Math.round(imgData.width * scale));
+    const height = Math.max(1, Math.round(imgData.height * scale));
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = imgData.width;
+    tempCanvas.height = imgData.height;
+    const tempCtx = tempCanvas.getContext('2d');
+    tempCtx.putImageData(imgData, 0, 0);
+    
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(tempCanvas, 0, 0, width, height);
+    
+    return ctx.getImageData(0, 0, width, height);
+}
+
 // ─── Conversion ────────────────────────────────────────────────────────────
 convertBtn.addEventListener('click', async () => {
     if (!sourceImgData) return;
@@ -1137,14 +1340,18 @@ convertBtn.addEventListener('click', async () => {
         const m = FMT_META[outputFmt];
         let usedQuality = qualityVal;
 
+        const activeImgData = (resizeEnabled && scaleVal !== 100)
+            ? getResizedImageData(sourceImgData, scaleVal)
+            : sourceImgData;
+
         if (maxSizeEnabled && maxSizeBytes > 0 && m.hasQuality) {
             maxSizeStatus.style.display = 'none';
-            const result = await encodeToFitSize(sourceImgData, outputFmt, speedVal, maxSizeBytes);
+            const result = await encodeToFitSize(activeImgData, outputFmt, speedVal, maxSizeBytes);
             const elapsed = Math.round(performance.now() - t0);
             setProgress(100, 'Done');
             if (!result) {
                 // Even q=0 didn't fit — encode at q=0 and warn
-                const buf0 = await encode(sourceImgData, outputFmt, 0, speedVal);
+                const buf0 = await encode(activeImgData, outputFmt, 0, speedVal);
                 outputBlob = new Blob([buf0], { type: m.mime });
                 usedQuality = 0;
                 maxSizeStatus.style.display = 'block';
@@ -1157,7 +1364,7 @@ convertBtn.addEventListener('click', async () => {
             }
             lastEncodeMs = elapsed;
         } else {
-            const buf = await encode(sourceImgData, outputFmt, qualityVal, speedVal);
+            const buf = await encode(activeImgData, outputFmt, qualityVal, speedVal);
             const elapsed = Math.round(performance.now() - t0);
             setProgress(100, 'Done');
             outputBlob = new Blob([buf], { type: m.mime });
@@ -1190,7 +1397,7 @@ convertBtn.addEventListener('click', async () => {
         statSSIM.textContent = '…';
         statPSNR.textContent = '…';
         decodeToImageData(outputBlob).then(outImgData => {
-            const { ssim, psnr } = computeSSIMandPSNR(sourceImgData, outImgData);
+            const { ssim, psnr } = computeSSIMandPSNR(activeImgData, outImgData);
             lastSSIM = ssim; lastPSNR = psnr;
             const ssimColor = ssim > 0.98 ? '#22c55e' : ssim > 0.95 ? '#86efac' : ssim > 0.90 ? '#fbbf24' : '#f87171';
             statSSIM.innerHTML = `<span style="color:${ssimColor}">${ssim.toFixed(4)}</span>`;
@@ -1425,7 +1632,8 @@ downloadBtn.addEventListener('click', () => {
     const base = sourceFile ? sourceFile.name.replace(/\.[^.]+$/, '') : 'converted';
     const a = document.createElement('a');
     a.href = URL.createObjectURL(outputBlob);
-    a.download = `${base}-q${lastUsedQuality ?? qualityVal}.${m.ext}`;
+    const scaleSuffix = (resizeEnabled && scaleVal !== 100) ? `-scale${scaleVal}pct` : '';
+    a.download = `${base}${scaleSuffix}-q${lastUsedQuality ?? qualityVal}.${m.ext}`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 });
@@ -1776,6 +1984,14 @@ document.getElementById('clearConfigBtn').addEventListener('click', () => {
     updateQualityDisp(80);
     // Update speed pills
     document.querySelectorAll('.speed-pill').forEach(b => b.classList.toggle('active', parseInt(b.dataset.speed) === 1));
+    
+    // Reset resize settings
+    setResizeEnabled(false);
+    scaleVal = 100;
+    scaleRange.value = 100;
+    document.querySelectorAll('#scalePresets .speed-pill').forEach(b => b.classList.toggle('active', parseInt(b.dataset.scale) === 100));
+    updateResizeUI();
+    
     updateFmtUI();
     // Visual feedback: flash the button
     const btn = document.getElementById('clearConfigBtn');
