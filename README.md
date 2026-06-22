@@ -9,10 +9,15 @@ A single-file, client-side image converter that runs entirely in the browser —
 - **Auto-convert** — re-encodes automatically 1 second after any setting change, with an animated countdown ring
 - **Quality slider** — named presets (Lossless → Draft) mapped to encoder-native parameters per format
 - **Effort / Speed control** — 5 levels trading encode time against file size (AVIF, WebP, PNG)
-- **Live stats** — original size, output size, savings %, and encode time shown in the preview header
+- **Resize / Scale** — scale by percentage (1–200 %), clamp to max width or height, or set exact dimensions with fit / fill / stretch modes
+- **Max File Size** — binary search finds the highest quality that fits within a chosen target (64 KiB, 128 KiB, 256 KiB, 512 KiB, 1 MiB, or a custom KiB value); moves the Quality slider to the found value when done
+- **Image quality metrics** — SSIM and PSNR computed in-browser and shown alongside encode stats; toggleable
+- **Live stats** — original size, output size, savings %, and encode time shown in the preview header and stats panel; all sizes displayed in decimal units (KB / MB)
 - **Persistent settings** — format, quality, speed, and auto-convert toggle are saved to `localStorage` and restored on next visit
-- **Flexible input** — drag & drop onto the sidebar, either image panel, or anywhere on the page; click to browse; or paste from clipboard
-- **Download** — saves the converted file with the original base name and the correct extension
+- **Flexible input** — drag & drop onto the sidebar, either image panel, or anywhere on the page; click to browse; or paste from clipboard (`Ctrl+V`)
+- **Copy to clipboard** — copies the converted image as PNG directly to the system clipboard
+- **Download** — saves the converted file with the original base name, quality, scale suffix, and the correct extension
+- **Keyboard shortcuts** — full keyboard control for all common actions (see table below)
 
 ## Formats
 
@@ -25,12 +30,7 @@ A single-file, client-side image converter that runs entirely in the browser —
 | **PNG** | Lossless; optimised with OxiPNG after initial encode |
 
 ## Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `+` / `=` | Zoom in |
-| `-` | Zoom out |
-| `0` | Fit image to panel |
+Press ? to show keyboard shortcuts.
 
 ## Usage
 
@@ -71,6 +71,9 @@ Drop `index.html` on any static host (GitHub Pages, Netlify, Vercel, Cloudflare 
 
 Everything lives in a single `index.html` file:
 
-- **Decoding** — the browser's native `Canvas` API handles all source formats (JPEG, PNG, WebP, AVIF, GIF, BMP, …) without extra WASM
+- **Decoding** — the browser's native Canvas API handles all source formats (JPEG, PNG, WebP, AVIF, GIF, BMP, …) without extra WASM
 - **Encoding** — jsquash WASM modules loaded via [esm.sh](https://esm.sh) as ES module imports
+- **Max File Size** — binary search over the quality ladder (0–100 in steps of 5) finds the highest quality whose output fits within the target byte count; AVIF searches are forced to effort level 1 to keep them responsive
+- **Metrics** — SSIM and PSNR are computed in-browser on luma (Y from YCbCr) after decoding the output blob back through the Canvas API
+- **Zoom / pan** — both preview panels share a single transform state; when output dimensions differ from the source (e.g. after a resize), the output viewport scale is compensated so both images appear at the same visual zoom level
 - **No framework** — vanilla JS with direct DOM manipulation
